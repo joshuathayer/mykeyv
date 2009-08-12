@@ -20,6 +20,8 @@ sub new {
 		return_values => {},
 	};
 
+	$self->{rid} = 0;	
+
 	my $kv = Mykeyv->new({
 		'host' => "127.0.0.1",
 		'port' => 3306,
@@ -33,9 +35,19 @@ sub new {
 	return(bless($self, $class));
 }
 
+# create a new request ID
+sub getRID {
+	my $self = shift;
+	$self->{rid} += 1;
+	return $self->{rid};
+}
+
 sub new_connection {
 	my $self = shift;
-	my @rest = @_;
+	my ($ip, $port, $fh) = @_;
+	
+	# create an array to hold return values
+	$self->{return_values}->{$fh} = [];
 }
 
 sub remote_closed {
@@ -44,30 +56,27 @@ sub remote_closed {
     print STDERR "$host closed connection!\n";
 }
 
+# called by framework
 sub message {
 	my ($self, $host, $port, $message, $fh) = @_;
 
 	#print "received a message from host $host port $port:\n";
 	#print Dumper $message;
-	#
+	
 	foreach my $m (@$message) {
 		$m = from_json($m);
 		if ($m->{command} eq "set") {
-			$self->do_set($fh, $m->{key}, $m->{data});
+			$self->do_set($fh, $m->{key}, $m->{data}, $m->{request_id});
 		} elsif ($m->{command} eq "get") {
-			$self->do_get($fh, $m->{key});
+			$self->do_get($fh, $m->{key}, $m->{request_id});
 		}
 	}
 
-	# we return this filehandle- this will indicate to Sisyphus that we have
-	# something to send back to the client. in this example case, we'll just
-	# return a simple message
-
-	#$self->{client_callback}->([$fh]);
 }
 
 sub do_set {
-	my ($self, $fh, $key, $val) = @_;
+	my ($self, $fh, $key, $val, $client_rid) = @_;
+	my $rid = $self->getRID();
 
 	print STDERR "set >>$key<<\n";
 
@@ -77,15 +86,17 @@ sub do_set {
 				command => "set_ok",	
 				key => $key,
 				data => $v,
+				request_id => $client_rid,
 			});
-			$self->{return_values}->{$fh} = $r;
+			push (@{$self->{return_values}->{$fh}}, $r);
 			$self->{client_callback}->([$fh]);		
 		}
 	);
 }
 
 sub do_get {
-	my ($self, $fh, $key) = @_;
+	my ($self, $fh, $key, $client_rid) = @_;
+	my $rid = $self->getRID();
 
 	print STDERR "get >>$key<<\n";
 
@@ -95,8 +106,9 @@ sub do_get {
 				command => "get_ok",	
 				key => $key,
 				data => $v,
+				request_id => $client_rid,
 			});
-			$self->{return_values}->{$fh} = $r;
+			push (@{$self->{return_values}->{$fh}}, $r);
 			$self->{client_callback}->([$fh]);		
 		}
 	);
@@ -105,7 +117,7 @@ sub do_get {
 
 sub get_data {
 	my ($self, $fh) = @_;
-	my $v = $self->{return_values}->{$fh};
+	my $v = pop(@{$self->{return_values}->{$fh}});
 	return $v;
 }
 

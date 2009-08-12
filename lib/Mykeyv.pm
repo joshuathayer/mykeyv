@@ -1,5 +1,10 @@
 package Mykeyv;
 
+# this is the keyval client lib. it connects to a mysql server
+# and queries that DB for key/val data
+#
+# the main points of entry are get(), set(), getSync(), and setSync()
+
 use strict;
 use Sisyphus::Connector;
 use Sisyphus::Proto::Factory;
@@ -34,10 +39,9 @@ sub new {
 			print STDERR "An error occured while querying MySQL: $err\n";
 		},
 	}; 
-	$self->{qtable} = {};
 
 	my $cv = AnyEvent->condvar;
-	$self->{ac}->connectAsync(
+	$self->{ac}->connect(
 		sub {
 			print STDERR "connected to local mysql instance\n";
 			$cv->send;
@@ -47,23 +51,14 @@ sub new {
 	return bless($self, $class);
 }
 
-sub getQID {
-	my $self = shift;
-	$self->{qc} += 1;
-	return $self->{qc};
-}
-
 sub get {
 	my ($self, $key, $cb) = @_;
 
-	my $qid = $self->getQID();
-	$self->{qtable}->{$qid}->{value} = undef;
-
 	# try to get bucket contents
 	my $row;
+	my $val;
 
-	$self->_getBucket($key, $qid, sub {
-		my $rqid = shift;
+	$self->_getBucket($key, sub {
 		$row = shift;
 
 		$row = $row->[0];
@@ -72,13 +67,12 @@ sub get {
 			#print STDERR "got bucket with content\n";
 			$row = Storable::thaw($row);
 			if (defined($row->{$key})) {
-				#print STDERR "got bucket with this key!\n";
-				$self->{qtable}->{$qid}->{value} = $row->{$key};
+				# print STDERR "got bucket with this key!\n";
+				$val = $row->{$key};
 			}
 		} else {
-			#print STDERR "got NULL ROW- end of set, or empty set\n";
-			$cb->( $self->{qtable}->{$qid}->{value} );
-			delete $self->{qtable}->{$qid};
+			# print STDERR "got NULL ROW- end of set, or empty set\n";
+			$cb->($val);
 		}
 	});
 }
@@ -87,16 +81,11 @@ sub get {
 sub set {
 	my ($self, $key, $value, $cb) = @_;
 
-	# this is entry in the query table for this entire 'set' query
-	my $qid = $self->getQID();
-	$self->{qtable}->{$qid}->{cb} = $cb;
-	$self->{qtable}->{$qid}->{key} = $key;
-	$self->{qtable}->{$qid}->{bucket} = {};
+	my $bucket = {};
 
 	# try to get bucket contents
 	my $row;
-	$self->_getBucket($key, $qid, sub {
-
+	$self->_getBucket($key, sub {
 		$row = shift;
 		$row = $row->[0];
 
@@ -106,19 +95,16 @@ sub set {
 			if (defined($row->{$key})) {
 				print STDERR "replacing duplicate key >>$key<<\n";
 			}
-			$self->{qtable}->{$qid}->{bucket} = $row;
-			$self->{qtable}->{$qid}->{value};
+			$bucket = $row;
 		} else {
 			#print STDERR "got NULL ROW- end of set, or empty set\n";
-			$self->{qtable}->{$qid}->{bucket}->{$key} = $value;
-			#print Dumper  $self->{qtable}->{$qid}->{bucket};
-			$row = Storable::freeze($self->{qtable}->{$qid}->{bucket});
+			$bucket->{$key} = $value;
+			$row = Storable::freeze($bucket);
 
 			$self->_setBucket($key, $row, sub {
 				# if we're back here, we've set the proper row in the db
 				#print STDERR "looks like we updated the table\n";
 				$cb->();
-				delete $self->{qtable}->{$qid};
 			});
 		}
 	});
@@ -153,9 +139,8 @@ sub setSync {
 
 
 sub _getBucket {
-	my ($self, $key, $qid, $cb) = @_;
-	
-	
+	my ($self, $key, $cb) = @_;
+
 	my $md5key = md5($key);	
 	$md5key =~ s/\'/\\\'/g;
 
@@ -170,19 +155,17 @@ QQ
 
 	$self->{ac}->{protocol}->query(
 		q      => $q,
-		qid    => $qid,
 		cb     => sub {
 			my $row = shift;
-			$cb->($qid, $row);
+			$cb->($row);
 		},
 	);
 
 } 
 
 sub _setBucket {
-	my ($self, $key, $value, $qid, $cb) = @_;
-	
-	
+	my ($self, $key, $value, $cb) = @_;
+
 	my $md5key = md5($key);	
 	$md5key =~ s/\'/\\\'/g;
 	$value =~ s/\'/\\\'/g;
@@ -198,11 +181,11 @@ QQ
 
 	$self->{ac}->{protocol}->query(
 		q      => $q,
-		qid    => $qid,
+		#qid    => $qid,
 		cb     => sub {
 			my $row = shift;
 			#print "---> received ID $row->[0]\n";
-			$cb->($qid, $row);
+			$cb->($row);
 		},
 	);
 
