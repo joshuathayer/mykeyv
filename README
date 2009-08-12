@@ -1,3 +1,72 @@
 Mykeyv intends to be a distributed, mysql-backed key/value store.
 
 It requires the Sisyphus library: http://github.com/joshuathayer/sisyphus/tree/master . 
+
+Very trivial example:
+
+	# instantiate handle
+    my $kv = Mykeyv->new({
+        'host' => "127.0.0.1",
+        'port' => 3306,
+        'user' => 'keyvalue',
+        'pw' => 'password',
+        'db' => 'keyvalue',
+    });
+
+	# create an object to store
+	my $object = {
+		first => "John",
+		last => "Bonham",
+		band => "Zeppelin",
+		albums => [
+			"Houses of the Holy","IV"
+		],
+	};
+
+	# set object in store
+	$kv->set("bonham", $object, sub { print "set object\n"; });
+
+	# retrieve object from store
+	$kv->get("bonham", sub { my $object = shift; print Dumper $object; });
+
+Also included is a first stab at a network wrapper for this service, in bin/kvd.pl. It speaks the sisyphus "trivial" protocol, and expects commands in json, as shown:
+
+	my $ac  = new Sisyphus::Connector;
+	$ac->{host} = "127.0.0.1";
+	$ac->{port} = 8889;
+	$ac->{protocolName} = "Trivial";
+
+	$ac->{app_callback} = sub {
+	    my $message = shift;
+	    print "i received a message from kv daemon:\n";
+	    print $message . "\n";
+	};
+
+	# set a record
+	my $message = {
+	    command => "set",
+	    key => "bonham",
+	    data => {
+	        first => "John",
+	        last => "Bonham",
+	        band => "Zeppelin",
+	        albums => [
+	            "Houses of the Holy","IV"
+	        ],
+	    },
+	};
+
+	$ac->send(to_json($o));
+
+	# get a record
+	# in this case, we add a request_id, which will be returned to us
+	# in the result set. which allows us to keep track of queries and they
+	# return. probably, ideally, we'd be able to spec a callback here instead
+	my $json = to_json($o = {
+		command => "get",
+		key => "bonham",
+		request_id => 1,
+	});
+
+	$ac->send($json);
+
