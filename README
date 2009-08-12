@@ -1,0 +1,3 @@
+Mykeyv intends to be a distributed, mysql-backed key/value store.
+
+It requires the Sisyphus library: http://github.com/joshuathayer/sisyphus/tree/master . 
