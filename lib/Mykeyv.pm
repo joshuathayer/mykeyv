@@ -4,13 +4,32 @@ package Mykeyv;
 # and queries that DB for key/val data
 #
 # the main points of entry are get(), set(), getSync(), and setSync()
+#
+# CLUSTER INFORMATION
+# For normal "persistant-connection" operation, this module doesn't need
+# to know about how keys are hashed- the client keeps that state, and 
+# will send right queries to the right places. However, once "one-off"
+# queries are implemented (by scripts that aren't long-running enough to
+# figure out the state of the DHT on their own), the module might be 
+# called upon to forward queries to the right places. Meaning it will
+# want to have an idea of what the DHT looks like. Also, for rehashing
+# after adding a bucket, etc, this module might want to know wtf.
+# Of course, we could simplify by saying that all clients must send the 
+# queries to the right place on their own, and that rehashing must be 
+# taken care of by a special purpose client, and that would simplify
+# this module considerably at the expense of added complexity and perhaps
+# decreased efficiency elsewhere.
 
 use strict;
 use Sisyphus::Connector;
+use Sisyphus::ConnectionPool;
 use Sisyphus::Proto::Factory;
 use Digest::MD5 qw(md5);
 use Storable;
 use Data::Dumper;
+use Set::ConsistentHash;
+use String::CRC32;
+
 
 # constructor.
 # note that THIS WILL BLOCK CALLING CODE
@@ -25,12 +44,13 @@ sub new {
 	# query counter. internal index of queries
 	$self->{qc} = 0;
 
-	$self->{ac} = new Sisyphus::Connector;
-	$self->{ac}->{host} = $in->{host};
-	$self->{ac}->{port} = $in->{port};
-
-	$self->{ac}->{protocolName} = "Mysql";
-	$self->{ac}->{protocolArgs} = {
+	# set up pool of Mysql connections, per 
+	$self->{pool} = new Sisyphus::ConnectionPool;
+	$self->{pool}->{host} = $in->{host};
+	$self->{pool}->{port} = $in->{port};
+	$self->{pool}->{connections_to_make} = 10;
+	$self->{pool}->{protocolName} = "Mysql";
+	$self->{pool}->{protocolArgs} = {
 		user => $in->{user},
 		pw => $in->{pw},
 		db => $in->{db},
@@ -41,7 +61,7 @@ sub new {
 	}; 
 
 	my $cv = AnyEvent->condvar;
-	$self->{ac}->connect(
+	$self->{pool}->connect(
 		sub {
 			print STDERR "connected to local mysql instance\n";
 			$cv->send;
@@ -141,6 +161,7 @@ sub setSync {
 sub _getBucket {
 	my ($self, $key, $cb) = @_;
 
+
 	my $md5key = md5($key);	
 	$md5key =~ s/\'/\\\'/g;
 
@@ -153,10 +174,15 @@ WHERE
 	Thekey = '$md5key'
 QQ
 
-	$self->{ac}->{protocol}->query(
+	my $ac = $self->{pool}->claim();
+	$ac->{connection}->{protocol}->query(
 		q      => $q,
 		cb     => sub {
 			my $row = shift;
+			unless ($row) {
+				# if we get an empty row, we're done.
+				$self->{pool}->release($ac);
+			}
 			$cb->($row);
 		},
 	);
@@ -179,11 +205,13 @@ ON DUPLICATE KEY UPDATE
 	TheValue = '$value'
 QQ
 
-	$self->{ac}->{protocol}->query(
+	my $ac = $self->{pool}->claim();
+	$ac->{connection}->{protocol}->query(
 		q      => $q,
 		#qid    => $qid,
 		cb     => sub {
 			my $row = shift;
+			$self->{pool}->release($ac);
 			#print "---> received ID $row->[0]\n";
 			$cb->($row);
 		},
