@@ -1,7 +1,8 @@
 package MyKVApp;
 
-# this is the keyval daemon app
-# uses the Keyv client lib
+# this is the keyval daemon App
+# uses the Keyv lib to do the actual talking to Mysql
+# is used by kvd, and is an App in the Sisyphus framework sense
 
 use lib ("/home/joshua/projects/sisyphus/lib");
 use lib ("/home/joshua/projects/keyv/lib");
@@ -10,6 +11,8 @@ use strict;
 use Mykeyv;
 use Data::Dumper;
 use JSON;
+use Set::ConsistentHash;
+use String::CRC32;
 
 # TODO
 # alarms to clear return_values
