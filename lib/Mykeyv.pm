@@ -44,6 +44,9 @@ sub new {
 	# query counter. internal index of queries
 	$self->{qc} = 0;
 
+	# query queue. 
+	$self->{queryqueue} = [];
+
 	# set up pool of Mysql connections, per 
 	$self->{pool} = new Sisyphus::ConnectionPool;
 	$self->{pool}->{host} = $in->{host};
@@ -67,67 +70,93 @@ sub new {
 			$cv->send;
 		}
 	);
+
 	$cv->recv; 
-	return bless($self, $class);
+
+	my $self = bless($self, $class);
+	$self->{pool}->{release_cb} = sub { $self->service_queryqueue-() };
+
+	return $self;
+}
+
+sub service_queryqueue {
+	my $self = shift;
+
+	if ($self->{pool}->claimable()) {
+		if (scalar(@{$self->{queryqueue}})) {
+			my $sub = pop(@{$self->{queryqueue}});
+			$sub->();
+		}
+	}
+
 }
 
 sub get {
 	my ($self, $key, $cb) = @_;
 
-	# try to get bucket contents
-	my $row;
-	my $val;
 
-	$self->_getBucket($key, sub {
-		$row = shift;
+	push(@{$self->{queryqueue}}, sub {
 
-		$row = $row->[0];
+		# try to get bucket contents
+		my $row;
+		my $val;
 
-		if (defined($row)) {
-			#print STDERR "got bucket with content\n";
-			$row = Storable::thaw($row);
-			if (defined($row->{$key})) {
-				# print STDERR "got bucket with this key!\n";
-				$val = $row->{$key};
+		$self->_getBucket($key, sub {
+			$row = shift;
+
+			$row = $row->[0];
+	
+			if (defined($row)) {
+				#print STDERR "got bucket with content\n";
+				$row = Storable::thaw($row);
+				if (defined($row->{$key})) {
+					# print STDERR "got bucket with this key!\n";
+					$val = $row->{$key};
+				}
+			} else {
+				# print STDERR "got NULL ROW- end of set, or empty set\n";
+				$cb->($val);
 			}
-		} else {
-			# print STDERR "got NULL ROW- end of set, or empty set\n";
-			$cb->($val);
-		}
+		});
 	});
+
+	$self->service_queryqueue();
 }
 
 # alert. will *replace* existing values.
 sub set {
 	my ($self, $key, $value, $cb) = @_;
 
-	my $bucket = {};
+	push(@{$self->{queryqueue}}, sub {
+		my $bucket = {};
+		# try to get bucket contents
+		my $row;
+		$self->_getBucket($key, sub {
+			$row = shift;
+			$row = $row->[0];
 
-	# try to get bucket contents
-	my $row;
-	$self->_getBucket($key, sub {
-		$row = shift;
-		$row = $row->[0];
+			if (defined($row)) {
+				#print STDERR "got bucket with content\n";
+				$row = Storable::thaw($row);
+				if (defined($row->{$key})) {
+					print STDERR "replacing duplicate key >>$key<<\n";
+				}
+				$bucket = $row;
+			} else {
+				#print STDERR "got NULL ROW- end of set, or empty set\n";
+				$bucket->{$key} = $value;
+				$row = Storable::freeze($bucket);
 
-		if (defined($row)) {
-			#print STDERR "got bucket with content\n";
-			$row = Storable::thaw($row);
-			if (defined($row->{$key})) {
-				print STDERR "replacing duplicate key >>$key<<\n";
+				$self->_setBucket($key, $row, sub {
+					# if we're back here, we've set the proper row in the db
+					#print STDERR "looks like we updated the table\n";
+					$cb->();
+				});
 			}
-			$bucket = $row;
-		} else {
-			#print STDERR "got NULL ROW- end of set, or empty set\n";
-			$bucket->{$key} = $value;
-			$row = Storable::freeze($bucket);
-
-			$self->_setBucket($key, $row, sub {
-				# if we're back here, we've set the proper row in the db
-				#print STDERR "looks like we updated the table\n";
-				$cb->();
-			});
-		}
+		});
 	});
+
+	$self->service_queryqueue();
 };
 
 sub getSync {
