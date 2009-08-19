@@ -74,7 +74,7 @@ sub new {
 	$cv->recv; 
 
 	my $self = bless($self, $class);
-	$self->{pool}->{release_cb} = sub { $self->service_queryqueue-() };
+	$self->{pool}->{release_cb} = sub { $self->service_queryqueue };
 
 	return $self;
 }
@@ -94,30 +94,26 @@ sub service_queryqueue {
 sub get {
 	my ($self, $key, $cb) = @_;
 
+	# try to get bucket contents
+	my $row;
+	my $val;
 
-	push(@{$self->{queryqueue}}, sub {
+	$self->_getBucket($key, sub {
+		$row = shift;
 
-		# try to get bucket contents
-		my $row;
-		my $val;
-
-		$self->_getBucket($key, sub {
-			$row = shift;
-
-			$row = $row->[0];
+		$row = $row->[0];
 	
-			if (defined($row)) {
-				#print STDERR "got bucket with content\n";
-				$row = Storable::thaw($row);
-				if (defined($row->{$key})) {
-					# print STDERR "got bucket with this key!\n";
-					$val = $row->{$key};
-				}
-			} else {
-				# print STDERR "got NULL ROW- end of set, or empty set\n";
-				$cb->($val);
+		if (defined($row)) {
+			#print STDERR "got bucket with content\n";
+			$row = Storable::thaw($row);
+			if (defined($row->{$key})) {
+				# print STDERR "got bucket with this key!\n";
+				$val = $row->{$key};
 			}
-		});
+		} else {
+			# print STDERR "got NULL ROW- end of set, or empty set\n";
+			$cb->($val);
+		}
 	});
 
 	$self->service_queryqueue();
@@ -127,33 +123,31 @@ sub get {
 sub set {
 	my ($self, $key, $value, $cb) = @_;
 
-	push(@{$self->{queryqueue}}, sub {
-		my $bucket = {};
-		# try to get bucket contents
-		my $row;
-		$self->_getBucket($key, sub {
-			$row = shift;
-			$row = $row->[0];
+	my $bucket = {};
+	# try to get bucket contents
+	my $row;
+	$self->_getBucket($key, sub {
+		$row = shift;
+		$row = $row->[0];
 
-			if (defined($row)) {
-				#print STDERR "got bucket with content\n";
-				$row = Storable::thaw($row);
-				if (defined($row->{$key})) {
-					print STDERR "replacing duplicate key >>$key<<\n";
-				}
-				$bucket = $row;
-			} else {
-				#print STDERR "got NULL ROW- end of set, or empty set\n";
-				$bucket->{$key} = $value;
-				$row = Storable::freeze($bucket);
-
-				$self->_setBucket($key, $row, sub {
-					# if we're back here, we've set the proper row in the db
-					#print STDERR "looks like we updated the table\n";
-					$cb->();
-				});
+		if (defined($row)) {
+			#print STDERR "got bucket with content\n";
+			$row = Storable::thaw($row);
+			if (defined($row->{$key})) {
+				print STDERR "replacing duplicate key >>$key<<\n";
 			}
-		});
+			$bucket = $row;
+		} else {
+			#print STDERR "got NULL ROW- end of set, or empty set\n";
+			$bucket->{$key} = $value;
+			$row = Storable::freeze($bucket);
+
+			$self->_setBucket($key, $row, sub {
+				# if we're back here, we've set the proper row in the db
+				#print STDERR "looks like we updated the table\n";
+				$cb->();
+			});
+		}
 	});
 
 	$self->service_queryqueue();
@@ -203,18 +197,20 @@ WHERE
 	Thekey = '$md5key'
 QQ
 
-	my $ac = $self->{pool}->claim();
-	$ac->{connection}->{protocol}->query(
-		q      => $q,
-		cb     => sub {
-			my $row = shift;
-			unless ($row) {
-				# if we get an empty row, we're done.
-				$self->{pool}->release($ac);
-			}
-			$cb->($row);
-		},
-	);
+	push(@{$self->{queryqueue}}, sub {
+		my $ac = $self->{pool}->claim();
+		$ac->{connection}->{protocol}->query(
+			q      => $q,
+			cb     => sub {
+				my $row = shift;
+				unless ($row) {
+					# if we get an empty row, we're done.
+					$self->{pool}->release($ac);
+				}
+				$cb->($row);
+			},
+		);
+	});
 
 } 
 
@@ -234,17 +230,19 @@ ON DUPLICATE KEY UPDATE
 	TheValue = '$value'
 QQ
 
-	my $ac = $self->{pool}->claim();
-	$ac->{connection}->{protocol}->query(
-		q      => $q,
-		#qid    => $qid,
-		cb     => sub {
-			my $row = shift;
-			$self->{pool}->release($ac);
-			#print "---> received ID $row->[0]\n";
-			$cb->($row);
-		},
-	);
+	push(@{$self->{queryqueue}}, sub {
+		my $ac = $self->{pool}->claim();
+		$ac->{connection}->{protocol}->query(
+			q      => $q,
+			#qid    => $qid,
+			cb     => sub {
+				my $row = shift;
+				$self->{pool}->release($ac);
+				#print "---> received ID $row->[0]\n";
+				$cb->($row);
+			},
+		);
+	});
 
 } 
 
