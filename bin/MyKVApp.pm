@@ -19,6 +19,7 @@ use String::CRC32;
 
 sub new {
 	my $class = shift;
+	my ($dbip, $dbport, $dbuser, $dbpw, $dbdb) = @_;
 	my $self = {
 		return_values => {},
 	};
@@ -26,11 +27,11 @@ sub new {
 	$self->{rid} = 0;	
 
 	my $kv = Mykeyv->new({
-		'host' => "127.0.0.1",
-		'port' => 3306,
-		'user' => 'keyvalue',
-		'pw' => 'roses',
-		'db' => 'keyvalue',
+		'host' => $dbip, # "127.0.0.1",
+		'port' => $dbport, # 3306,
+		'user' => $dbuser, # 'keyvalue',
+		'pw' => $dbpw, # 'roses',
+		'db' => $dbdb, # 'keyvalue',
 	});
 
 	$self->{kv} = $kv;
