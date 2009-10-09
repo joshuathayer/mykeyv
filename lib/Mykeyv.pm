@@ -29,7 +29,9 @@ use Storable;
 use Data::Dumper;
 use Set::ConsistentHash;
 use String::CRC32;
-
+use Sislog;
+use AnyEvent;
+use AnyEvent::Socket;
 
 # constructor.
 # note that THIS WILL BLOCK CALLING CODE
@@ -41,11 +43,18 @@ sub new {
 
 	my $self = { };
 
+	# logging
+	$self->{log} = Sislog->new({use_syslog=>1, facility=>"MyKVDaemon"});
+	$self->{log}->open();
+
+	$self->{log}->log("instantiating MyKV object");
+
 	# query counter. internal index of queries
 	$self->{qc} = 0;
 
 	# query queue. 
 	$self->{queryqueue} = [];
+	$self->{log}->log("connectin with user $in->{user}, port $in->{port}, host $in->{host}, db $in->{db}, pw $in->{pw}, table $in->{table}");
 
 	# set up pool of Mysql connections, per 
 	$self->{pool} = new Sisyphus::ConnectionPool;
@@ -59,23 +68,27 @@ sub new {
 		db => $in->{db},
 		err => sub {
 			my $err = shift;
-			print STDERR "An error occured while querying MySQL: $err\n";
+			$self->{log}->log("An error occured while querying MySQL: $err");
 		},
 	}; 
 
+	# table we should use. for development, we might want multiple
+	# tables per mysql server
+	$self->{table} = $in->{table};
 	my $cv = AnyEvent->condvar;
+	$self->{log}->log("about to call connect");
 	$self->{pool}->connect(
 		sub {
-			print STDERR "connected to local mysql instance\n";
+			$self->{log}->log("connected to local mysql instance");
 			$cv->send;
 		}
 	);
-
 	$cv->recv; 
 
 	my $self = bless($self, $class);
 	$self->{pool}->{release_cb} = sub { $self->service_queryqueue };
 
+	$self->{log}->log("Keyv object instantiaged");
 	return $self;
 }
 
@@ -123,31 +136,31 @@ sub get {
 sub set {
 	my ($self, $key, $value, $cb) = @_;
 
-	my $bucket = {};
 	# try to get bucket contents
 	my $row;
 	$self->_getBucket($key, sub {
 		$row = shift;
 		$row = $row->[0];
+		my $bucket = {};
 
 		if (defined($row)) {
-			#print STDERR "got bucket with content\n";
 			$row = Storable::thaw($row);
 			if (defined($row->{$key})) {
-				print STDERR "replacing duplicate key >>$key<<\n";
+				#$log->{log}->log("replacing duplicate key >>$key<<");
 			}
 			$bucket = $row;
 		} else {
 			#print STDERR "got NULL ROW- end of set, or empty set\n";
-			$bucket->{$key} = $value;
-			$row = Storable::freeze($bucket);
-
-			$self->_setBucket($key, $row, sub {
-				# if we're back here, we've set the proper row in the db
-				#print STDERR "looks like we updated the table\n";
-				$cb->();
-			});
 		}
+
+		$bucket->{$key} = $value;
+		$row = Storable::freeze($bucket);
+
+		$self->_setBucket($key, $row, sub {
+			# if we're back here, we've set the proper row in the db
+			#print STDERR "looks like we updated the table\n";
+			$cb->();
+		});
 	});
 
 	$self->service_queryqueue();
@@ -192,7 +205,7 @@ sub _getBucket {
 SELECT
 	TheValue
 FROM
-	Keyvalue
+	$self->{table}	
 WHERE
 	Thekey = '$md5key'
 QQ
@@ -223,7 +236,7 @@ sub _setBucket {
 
 	my $q = <<QQ;
 INSERT INTO
-	Keyvalue
+	$self->{table}
 SET
 	TheKey = '$md5key', TheValue = '$value'
 ON DUPLICATE KEY UPDATE

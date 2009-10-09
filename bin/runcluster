@@ -1,0 +1,26 @@
+#!/usr/bin/perl
+
+if ($#ARGV < 0) {
+	print "Script to start/stop a development cluster of kvds.\n\n";
+	print "Usage: $0 start|stop\n";
+	exit;
+}
+
+if ($ARGV[0] eq "start") {
+	`./kvd.pl ./kvd0.conf`;
+	`./kvd.pl ./kvd1.conf`;
+	`./kvd.pl ./kvd2.conf`;
+	`./kvd.pl ./kvd3.conf`;
+}
+
+if ($ARGV[0] eq "stop") {
+	`cat /tmp/keyvald0.lck \| xargs kill`;
+	`cat /tmp/keyvald1.lck \| xargs kill`;
+	`cat /tmp/keyvald2.lck \| xargs kill`;
+	`cat /tmp/keyvald3.lck \| xargs kill`;
+}
+
+if ($ARGV[0] eq "kick") {
+	`$0 stop`;	
+	`$0 start`;	
+}

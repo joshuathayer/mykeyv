@@ -1,7 +1,7 @@
 # example mykeyv client using sisyphus
 
 use strict;
-use lib ("/home/joshua/projects/sisyphus/lib/");
+use lib ("/Users/joshua/projects/sisyphus/lib/");
 
 use AnyEvent::Strict;
 use Sisyphus::Connector;
@@ -14,36 +14,29 @@ use JSON;
 use Set::ConsistentHash;
 use String::CRC32;
 
+BEGIN {
+	if ($#ARGV < 0) {
+		print "Usage: $0 PATH_TO_CONFFILE\n";
+		exit;
+	}
+}
+require $ARGV[0];
+my $cluster = $Config::cluster;
+
 my $set = Set::ConsistentHash->new;
 $set->set_hash_func(\&crc32);
 
-my $cluster = {
-	"chunk0" => {
-		ip => "192.168.170.127", # running on cazon
-		port => "8889",
-		db => "keyval",
-		user => "keyval",
-		pw => "roses",
-	},
-
-	"chunk1" => {		# running locally on piper
-		ip => "127.0.0.1",	
-		port => "8889",
-		db => "keyval",
-		user => "keyval",
-		pw => "roses",
-	},
-};
-
-my $targets = {
-    "chunk0" => 1,
-    "chunk1" => 1,
-};
+# set up hash of cluster elements, for Consistent to work with
+my $i = 0; my $targets;
+foreach my $t (@$cluster) {
+	$targets->{$i} = 1;
+	$i += 1;
+}
 
 $set->modify_targets( %$targets );
 
-foreach my $chunk ($set->targets()) {
-	my $serv = $cluster->{$chunk};
+foreach my $target ($set->targets()) {
+	my $serv = $cluster->[$target];
 
 	my $ac  = new Sisyphus::Connector;
 	$ac->{host} = $serv->{ip};
@@ -52,11 +45,11 @@ foreach my $chunk ($set->targets()) {
 
 	$ac->{app_callback} = sub {
 		my $message = shift;
-		print "i received a message from $chunk:\n";
+		print "i received a message from $target:\n";
 		print $message . "\n";
 	};
 
-	$cluster->{$chunk}->{ac} = $ac;
+	$cluster->[$target]->{ac} = $ac;
 
 	my $cv = AnyEvent->condvar;
 	$ac->connect(sub { print STDERR "connected.\n"; $cv->send; });
@@ -65,8 +58,8 @@ foreach my $chunk ($set->targets()) {
 
 foreach my $key (qw/ringo john joshua jones frank dweezil moonunit dave jimmy miles jerry phil bob bill zakhir/) {
 	my $serv =  $set->get_target($key);
-	print "going to $serv ($cluster->{$serv}->{ip}) for $key\n";
-	my $ac = $cluster->{$serv}->{ac};
+	print "going to $serv ($cluster->[$serv]->{ip}) for $key\n";
+	my $ac = $cluster->[$serv]->{ac};
 
 	# set a record
 	my $o = {

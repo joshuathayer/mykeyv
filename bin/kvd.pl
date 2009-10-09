@@ -1,9 +1,12 @@
 #!/usr/bin/perl
 
 use strict;
-use lib ('/home/joshua/projects/sisyphus/lib');
-use lib ('/home/joshua/projects/mykeyv/lib');
+use lib ('/Users/joshua/projects/sisyphus/lib');
+use lib ('/Users/joshua/projects/mykeyv/lib');
 
+use File::Lockfile;
+use Proc::Daemon;
+use Sys::Hostname;
 use Sisyphus::Listener;
 use Sisyphus::Proto::Trivial;
 use AnyEvent::Strict;
@@ -17,16 +20,28 @@ BEGIN {
 }
 
 my $confPath = $ARGV[0];
-print "confpath $confPath\n";
 require $confPath;
-
 my $config = $Config::config;
-print Dumper $Config::config;
 
+# lockfile
+my $lockfile = File::Lockfile->new($config->{dname}, "/tmp");
+my $pid = $lockfile->check();
+if ($pid) { print "Lockfile detected for daemon " . $config->{dname} . ", pid $pid\n"; exit;}
+
+
+# background, if wanted.
+$config->{daemonize} && Proc::Daemon::Init; 
+
+my $log = Sislog->new({use_syslog=>1, facility=>$config->{dname}});
+$log->open();
+
+$lockfile->write;
+
+$log->log("keyvalue coming up");
 my $listener = new Sisyphus::Listener;
 
-$listener->{port} = $config->{port}; # 8889;
-$listener->{ip} = $config->{ip}; # "127.0.0.1";
+$listener->{port} = $config->{port}; 
+$listener->{ip} = $config->{ip}; 
 $listener->{protocol} = "Sisyphus::Proto::Trivial";
 $listener->{application} = MyKVApp->new(
 	$config->{dbip},
@@ -34,9 +49,24 @@ $listener->{application} = MyKVApp->new(
 	$config->{dbuser},
 	$config->{dbpw},
 	$config->{dbdb},
+	$config->{dbtable},
+	$log,
 );
 $listener->{use_push_write} = 0;
 $listener->listen();
 
 AnyEvent->condvar->recv;
 
+$lockfile->remove;
+
+END {
+	if ($! or $@) {
+		my $errm = "kvd ended with error: $! $@";
+		if ($log) {
+			$log->log($errm, time);
+		} else {
+			print STDERR "KVD doesn't have log object, and:\n";
+			print STDERR "$errm\n";
+		}
+	}
+}

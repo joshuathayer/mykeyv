@@ -19,12 +19,13 @@ use String::CRC32;
 
 sub new {
 	my $class = shift;
-	my ($dbip, $dbport, $dbuser, $dbpw, $dbdb) = @_;
+	my ($dbip, $dbport, $dbuser, $dbpw, $dbdb, $dbtable, $log) = @_;
 	my $self = {
 		return_values => {},
 	};
 
-	$self->{rid} = 0;	
+	$self->{rid} = 0;
+	$self->{log} = $log;
 
 	my $kv = Mykeyv->new({
 		'host' => $dbip, # "127.0.0.1",
@@ -32,6 +33,8 @@ sub new {
 		'user' => $dbuser, # 'keyvalue',
 		'pw' => $dbpw, # 'roses',
 		'db' => $dbdb, # 'keyvalue',
+		'table' => $dbtable, 
+		'log' => $log,
 	});
 
 	$self->{kv} = $kv;
@@ -64,9 +67,6 @@ sub remote_closed {
 sub message {
 	my ($self, $host, $port, $message, $fh) = @_;
 
-	#print "received a message from host $host port $port:\n";
-	#print Dumper $message;
-	
 	foreach my $m (@$message) {
 		$m = from_json($m);
 		if ($m->{command} eq "set") {
@@ -82,10 +82,11 @@ sub do_set {
 	my ($self, $fh, $key, $val, $client_rid) = @_;
 	my $rid = $self->getRID();
 
-	print STDERR "set >>$key<<\n";
+	$self->{log}->log("set >>$key<<");
 
 	$self->{kv}->set($key, $val, sub {
 			my $v = shift;
+			print "in do_set callback.\n";
 			my $r = to_json({
 				command => "set_ok",	
 				key => $key,
@@ -102,7 +103,7 @@ sub do_get {
 	my ($self, $fh, $key, $client_rid) = @_;
 	my $rid = $self->getRID();
 
-	print STDERR "get >>$key<<\n";
+	$self->{log}->log("get >>$key<< id $client_rid");
 
 	$self->{kv}->get($key, sub {
 			my $v = shift;
@@ -124,6 +125,5 @@ sub get_data {
 	my $v = pop(@{$self->{return_values}->{$fh}});
 	return $v;
 }
-
 
 1;
