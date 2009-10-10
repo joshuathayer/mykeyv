@@ -3,6 +3,8 @@
 
 use lib ("/Users/joshua/projects/sisyphus/lib/");
 use lib ("/Users/joshua/projects/mykeyv/lib/");
+use lib ("/home/joshua/projects/sisyphus/lib/");
+use lib ("/home/joshua/projects/mykeyv/lib/");
 
 use MyKVClient;
 use JSON;
@@ -22,22 +24,28 @@ my $kvc = MyKVClient->new({
 	cluster=>$cluster,
 });
 
-my $cv = AnyEvent->condvar;
-$kvc->set("joshua", {
-		age => 34,
-		first => "joshua",
-		last => "thayer",
-		parties => ["brithday", "bastille", "cinco de mayo", "wine and cheese ride"],
-	}, sub {
-		print "ok properly set joshua object. going to get it now!\n";
-		$cv->send;
-	}); 
-$cv->recv;
+#my $cv = AnyEvent->condvar;
+#foreach my $key (qw/ringo john joshua jones frank dweezil moonunit dave jimmy miles jerry phil bob bill zakhir/) {
+#	$cv->begin;
+#	$kvc->set($key, {
+#			age => int(rand() * 100),
+#			first => $key,
+#			last => "LeTest",
+#			parties => ["brithday", "bastille", "cinco de mayo", "wine and cheese ride"],
+#			amICool => "yes",
+#		}, sub {
+#			print "ok properly set $key object.\n";
+#			$cv->end;
+#		}); 
+#}
+#$cv->recv;
 
 my $cv = AnyEvent->condvar;
-$kvc->get("joshua", sub {
+$kvc->get("bob", sub {
 	my $r = shift;
 	print "age is " . $r->{data}->{age} . "\n";
+	print "last name is " . $r->{data}->{last} . "\n";
+	print "cool? " . $r->{data}->{amICool} . "\n";
 	$cv->send;
 });
 $cv->recv;

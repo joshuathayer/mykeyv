@@ -1,6 +1,7 @@
 package Config;
 
 # the cluster, that the client sees
+# confused. i think the client doesn't care about db names et al
 $cluster = [
 	{
 		ip => "127.0.0.1",

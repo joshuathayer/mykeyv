@@ -86,8 +86,7 @@ sub connectOne {
 			$self->{log}->log("received message from server for unrecognized request id $request_id");
 			return;
 		}
-		$self->{log}->log("found, and calling, callback for request $request_id");
-		$self->{log}->log(Dumper $m);
+		# $self->{log}->log("found, and calling, callback for request $request_id");
 		delete $self->{data_callbacks}->{$request_id};
 		$cb->($m);
 	};
@@ -131,7 +130,7 @@ sub set {
 	my $ac = $self->{cluster}->[$serv]->{ac};
 
 	my $request_id = $self->get_request_id();
-	$self->{log}->log("setting request callback for request $request_id in set");
+	# $self->{log}->log("setting request callback for request $request_id in set");
 	$self->{data_callbacks}->{$request_id} = $cb;
 
 	my $o = to_json({

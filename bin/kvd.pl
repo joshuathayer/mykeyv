@@ -3,6 +3,8 @@
 use strict;
 use lib ('/Users/joshua/projects/sisyphus/lib');
 use lib ('/Users/joshua/projects/mykeyv/lib');
+use lib ('/home/joshua/projects/sisyphus/lib');
+use lib ('/home/joshua/projects/mykeyv/lib');
 
 use File::Lockfile;
 use Proc::Daemon;
@@ -60,13 +62,8 @@ AnyEvent->condvar->recv;
 $lockfile->remove;
 
 END {
-	if ($! or $@) {
+	if ($log and ($! or $@)) {
 		my $errm = "kvd ended with error: $! $@";
-		if ($log) {
-			$log->log($errm, time);
-		} else {
-			print STDERR "KVD doesn't have log object, and:\n";
-			print STDERR "$errm\n";
-		}
+		$log->log($errm, time);
 	}
 }

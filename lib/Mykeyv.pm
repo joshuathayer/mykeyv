@@ -44,17 +44,16 @@ sub new {
 	my $self = { };
 
 	# logging
-	$self->{log} = Sislog->new({use_syslog=>1, facility=>"MyKVDaemon"});
+	$self->{log} = Sislog->new({use_syslog=>1, facility=>"Mykeyv"});
 	$self->{log}->open();
 
-	$self->{log}->log("instantiating MyKV object");
+	#$self->{log}->log("instantiating Mykeyv object");
 
 	# query counter. internal index of queries
 	$self->{qc} = 0;
 
 	# query queue. 
 	$self->{queryqueue} = [];
-	$self->{log}->log("connectin with user $in->{user}, port $in->{port}, host $in->{host}, db $in->{db}, pw $in->{pw}, table $in->{table}");
 
 	# set up pool of Mysql connections, per 
 	$self->{pool} = new Sisyphus::ConnectionPool;
@@ -76,10 +75,9 @@ sub new {
 	# tables per mysql server
 	$self->{table} = $in->{table};
 	my $cv = AnyEvent->condvar;
-	$self->{log}->log("about to call connect");
 	$self->{pool}->connect(
 		sub {
-			$self->{log}->log("connected to local mysql instance");
+			# $self->{log}->log("connected to local mysql instance");
 			$cv->send;
 		}
 	);
@@ -88,7 +86,6 @@ sub new {
 	my $self = bless($self, $class);
 	$self->{pool}->{release_cb} = sub { $self->service_queryqueue };
 
-	$self->{log}->log("Keyv object instantiaged");
 	return $self;
 }
 
@@ -110,21 +107,28 @@ sub get {
 	# try to get bucket contents
 	my $row;
 	my $val;
+	my $res;
 
 	$self->_getBucket($key, sub {
 		$row = shift;
-
 		$row = $row->[0];
 	
 		if (defined($row)) {
-			#print STDERR "got bucket with content\n";
-			$row = Storable::thaw($row);
-			if (defined($row->{$key})) {
-				# print STDERR "got bucket with this key!\n";
-				$val = $row->{$key};
+			if ($row eq "DONE") {
+				# ok this result is done.
+				#$self->{log}->log("DONE in get callback");
+				$cb->($val);
+			} else {
+				# whereas this is real data
+				$row = Storable::thaw($row);
+				if (defined($row->{$key})) {
+					#$self->{log}->log("get success");
+					$val = $row->{$key};
+				}
 			}
 		} else {
-			# print STDERR "got NULL ROW- end of set, or empty set\n";
+			# jt not sure in what instance we reach here.
+			$self->{log}->log("get failure? _getBucket called its callback with undef");
 			$cb->($val);
 		}
 	});
@@ -137,30 +141,44 @@ sub set {
 	my ($self, $key, $value, $cb) = @_;
 
 	# try to get bucket contents
-	my $row;
+	my ($row, $got);
 	$self->_getBucket($key, sub {
-		$row = shift;
-		$row = $row->[0];
-		my $bucket = {};
+		$got = shift;
+		$got = $got->[0];
 
-		if (defined($row)) {
-			$row = Storable::thaw($row);
-			if (defined($row->{$key})) {
-				#$log->{log}->log("replacing duplicate key >>$key<<");
+		# this will either remain undef, or be set to the bucket
+		# as it is in the DB.
+		my $bucket;
+		if (defined($got)) {
+			if ($got eq "DONE") {
+				# this is _getBucket telling us it returned all its data...
+				if (defined($row->{$key})) {
+
+					$self->{log}->log("replacing duplicate key >>$key<<");
+					$bucket = $row;
+
+				} else {
+
+					$self->{log}->log("this looks like a new key >>$key<<");
+
+				}
+				$bucket->{$key} = $value;
+				$row = Storable::freeze($bucket);
+		
+				$self->_setBucket($key, $row, sub {
+					# if we're back here, we've set the proper row in the db
+					#$self->{log}->log("in set callback");
+					$cb->();
+				});
+
+			} else {
+				# whereas this is _getBucket actually giving us a row
+				$row = Storable::thaw($got);
 			}
-			$bucket = $row;
 		} else {
-			#print STDERR "got NULL ROW- end of set, or empty set\n";
+			$self->{log}->log("unexpected, empty row for key >>$key<<");
 		}
 
-		$bucket->{$key} = $value;
-		$row = Storable::freeze($bucket);
-
-		$self->_setBucket($key, $row, sub {
-			# if we're back here, we've set the proper row in the db
-			#print STDERR "looks like we updated the table\n";
-			$cb->();
-		});
 	});
 
 	$self->service_queryqueue();
@@ -209,22 +227,26 @@ FROM
 WHERE
 	Thekey = '$md5key'
 QQ
-
+	$self->{log}->log($q);
 	push(@{$self->{queryqueue}}, sub {
 		my $ac = $self->{pool}->claim();
 		$ac->{connection}->{protocol}->query(
 			q      => $q,
 			cb     => sub {
 				my $row = shift;
-				unless ($row) {
-					# if we get an empty row, we're done.
+				if ($row eq "DONE") {
+					$self->{log}->log("got DONE in callback");
 					$self->{pool}->release($ac);
+					$cb->(["DONE"]);
+				} else {
+					$self->{log}->log("got A ROW in callback");
+					$cb->($row);
 				}
-				$cb->($row);
 			},
 		);
 	});
 
+	$self->service_queryqueue();
 } 
 
 sub _setBucket {
@@ -244,19 +266,19 @@ ON DUPLICATE KEY UPDATE
 QQ
 
 	push(@{$self->{queryqueue}}, sub {
+		# $self->{log}->log("in queryqueue callback.");
 		my $ac = $self->{pool}->claim();
 		$ac->{connection}->{protocol}->query(
 			q      => $q,
-			#qid    => $qid,
 			cb     => sub {
 				my $row = shift;
 				$self->{pool}->release($ac);
-				#print "---> received ID $row->[0]\n";
 				$cb->($row);
 			},
 		);
 	});
 
+	$self->service_queryqueue();
 } 
 
 1;

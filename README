@@ -1,6 +1,6 @@
 Mykeyv intends to be a distributed, mysql-backed key/value store.
 
-It requires the Sisyphus library: http://github.com/joshuathayer/sisyphus/tree/master . 
+It requires the Sisyphus library: http://github.com/joshuathayer/sisyphus/ 
 
 Very trivial example:
 
@@ -70,3 +70,4 @@ Also included is a first stab at a network wrapper for this service, in bin/kvd.
 
 	$ac->send($json);
 
+Actually, shit works great.
