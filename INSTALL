@@ -1,0 +1,29 @@
+Getting a development / testing environment going:
+
+get Sisyphus from github
+get mykeyv fromgithub
+install anyevent using your OS's package management tools
+use CPAN to install everything in reqs/REQS in both sisyphus and mykev
+
+create a mysql DB using the following recommended values:
+db KeyValue
+user KeyValue
+password KeyValuePass
+
+create db tables:
+cat KEYVALUES | mysql -u KeyValue -pKeyValuePass -h localhost KeyValue
+
+edit mykeyv/bin/kvd.pl to add the path to sisyphus/lib/ and mykeyv/lib/ to your perl lib path
+
+configure your syslogd to allow network logging, on ubuntu:
+
+in /etc/default/syslogd, uncomment:
+SYSLOGD="-r"
+
+in the mykeyv/bin directory, you should be able to run 
+sudo ./runcluster kick
+which will stop; start your cluster of kvd's
+
+in the mykeyv/bin directory, you should be able to run
+./clientUsingLib.pl ./clientConf.pl
+which will test the installation
