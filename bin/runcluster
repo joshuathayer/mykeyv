@@ -14,10 +14,10 @@ if ($ARGV[0] eq "start") {
 }
 
 if ($ARGV[0] eq "stop") {
-	`cat /tmp/keyvald0.lck \| xargs kill`;
-	`cat /tmp/keyvald1.lck \| xargs kill`;
-	`cat /tmp/keyvald2.lck \| xargs kill`;
-	`cat /tmp/keyvald3.lck \| xargs kill`;
+	`cat /var/run/keyvald0.pid \| xargs kill`;
+	`cat /var/run/keyvald1.pid \| xargs kill`;
+	`cat /var/run/keyvald2.pid\| xargs kill`;
+	`cat /var/run/keyvald3.pid\| xargs kill`;
 }
 
 if ($ARGV[0] eq "kick") {

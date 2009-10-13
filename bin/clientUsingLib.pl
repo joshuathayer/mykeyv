@@ -24,21 +24,21 @@ my $kvc = MyKVClient->new({
 	cluster=>$cluster,
 });
 
-#my $cv = AnyEvent->condvar;
-#foreach my $key (qw/ringo john joshua jones frank dweezil moonunit dave jimmy miles jerry phil bob bill zakhir/) {
-#	$cv->begin;
-#	$kvc->set($key, {
-#			age => int(rand() * 100),
-#			first => $key,
-#			last => "LeTest",
-#			parties => ["brithday", "bastille", "cinco de mayo", "wine and cheese ride"],
-#			amICool => "yes",
-#		}, sub {
-#			print "ok properly set $key object.\n";
-#			$cv->end;
-#		}); 
-#}
-#$cv->recv;
+my $cv = AnyEvent->condvar;
+foreach my $key (qw/ringo john joshua jones frank dweezil moonunit dave jimmy miles jerry phil bob bill zakhir/) {
+	$cv->begin;
+	$kvc->set($key, {
+			age => int(rand() * 100),
+			first => $key,
+			last => "LeTest",
+			parties => ["brithday", "bastille", "cinco de mayo", "wine and cheese ride"],
+			amICool => "yes",
+		}, sub {
+			print "ok properly set $key object.\n";
+			$cv->end;
+		}); 
+}
+$cv->recv;
 
 my $cv = AnyEvent->condvar;
 $kvc->get("bob", sub {

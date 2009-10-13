@@ -24,7 +24,8 @@ use strict;
 use Sisyphus::Connector;
 use Sisyphus::ConnectionPool;
 use Sisyphus::Proto::Factory;
-use Digest::MD5 qw(md5);
+use Sisyphus::Proto::Mysql;
+use Digest::MD5 qw(md5_base64);
 use Storable;
 use Data::Dumper;
 use Set::ConsistentHash;
@@ -32,6 +33,7 @@ use String::CRC32;
 use Sislog;
 use AnyEvent;
 use AnyEvent::Socket;
+use Data::HexDump;
 
 # constructor.
 # note that THIS WILL BLOCK CALLING CODE
@@ -215,9 +217,12 @@ sub setSync {
 sub _getBucket {
 	my ($self, $key, $cb) = @_;
 
-
-	my $md5key = md5($key);	
-	$md5key =~ s/\'/\\\'/g;
+	$self->{log}->log("key is $key");
+	my $md5key = md5_base64($key);
+	#$self->{log}->log(HexDump $md5key0);
+	#my $md5key = Sisyphus::Proto::Mysql::esc($md5key0);
+	$self->{log}->log("got back a key of length " . length($md5key));
+	#$self->{log}->log(HexDump $md5key);
 
 	my $q = <<QQ;
 SELECT
@@ -227,7 +232,6 @@ FROM
 WHERE
 	Thekey = '$md5key'
 QQ
-	$self->{log}->log($q);
 	push(@{$self->{queryqueue}}, sub {
 		my $ac = $self->{pool}->claim();
 		$ac->{connection}->{protocol}->query(
@@ -252,9 +256,9 @@ QQ
 sub _setBucket {
 	my ($self, $key, $value, $cb) = @_;
 
-	my $md5key = md5($key);	
-	$md5key =~ s/\'/\\\'/g;
-	$value =~ s/\'/\\\'/g;
+	#my $md5key = Sisyphus::Proto::Mysql::esc(md5($key));
+	my $md5key = md5_base64($key);
+	$value = Sisyphus::Proto::Mysql::esc($value);
 
 	my $q = <<QQ;
 INSERT INTO
@@ -264,9 +268,9 @@ SET
 ON DUPLICATE KEY UPDATE
 	TheValue = '$value'
 QQ
-
+	$self->{log}->log("in _setBucket");
 	push(@{$self->{queryqueue}}, sub {
-		# $self->{log}->log("in queryqueue callback.");
+		$self->{log}->log("in queryqueue callback.");
 		my $ac = $self->{pool}->claim();
 		$ac->{connection}->{protocol}->query(
 			q      => $q,

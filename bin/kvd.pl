@@ -6,38 +6,35 @@ use lib ('/Users/joshua/projects/mykeyv/lib');
 use lib ('/home/joshua/projects/sisyphus/lib');
 use lib ('/home/joshua/projects/mykeyv/lib');
 
-use File::Lockfile;
-use Proc::Daemon;
-use Sys::Hostname;
-use Sisyphus::Listener;
-use Sisyphus::Proto::Trivial;
-use AnyEvent::Strict;
-use MyKVApp;
+
 
 BEGIN {
 	if ($#ARGV < 0) {
 		print "Usage: $0 PATH_TO_CONFFILE\n";
 		exit;
 	}
+
 }
 
+use File::Lockfile;
+use Sys::Hostname;
+use Sisyphus::Listener;
+use Sisyphus::Proto::Trivial;
+use AnyEvent::Strict;
+use MyKVApp;
+use Net::Server::Daemonize qw ( daemonize check_pid_file );
+
+my $config;
 my $confPath = $ARGV[0];
 require $confPath;
-my $config = $Config::config;
-
-# lockfile
-my $lockfile = File::Lockfile->new($config->{dname}, "/tmp");
-my $pid = $lockfile->check();
-if ($pid) { print "Lockfile detected for daemon " . $config->{dname} . ", pid $pid\n"; exit;}
-
+$config = $Config::config;
 
 # background, if wanted.
-$config->{daemonize} && Proc::Daemon::Init; 
+unless(check_pid_file("/var/run/" . $config->{dname} . ".pid")) { print $config->{dname} . " already running- aborting"; exit; }
+$config->{daemonize} && daemonize('nobody','nobody',"/var/run/".$config->{dname}.".pid"); 
 
 my $log = Sislog->new({use_syslog=>1, facility=>$config->{dname}});
 $log->open();
-
-$lockfile->write;
 
 $log->log("keyvalue coming up");
 my $listener = new Sisyphus::Listener;
@@ -59,7 +56,7 @@ $listener->listen();
 
 AnyEvent->condvar->recv;
 
-$lockfile->remove;
+# $lockfile->remove;
 
 END {
 	if ($log and ($! or $@)) {
