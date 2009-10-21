@@ -19,7 +19,10 @@ use String::CRC32;
 
 sub new {
 	my $class = shift;
-	my ($dbip, $dbport, $dbuser, $dbpw, $dbdb, $dbtable, $log) = @_;
+
+	my ($dbip, $dbport, $dbuser, $dbpw, $dbdb, $dbtable, $log,
+	    $cluster, $pending_cluster, $cluster_state) = @_;
+
 	my $self = {
 		return_values => {},
 	};
@@ -35,6 +38,9 @@ sub new {
 		'db' => $dbdb, # 'keyvalue',
 		'table' => $dbtable, 
 		'log' => $log,
+		'cluster' => $cluster,
+		'pending_cluster' => $pending_cluster,
+		'cluster_state' => $cluster_state,
 	});
 
 	$self->{kv} = $kv;
@@ -73,6 +79,12 @@ sub message {
 			$self->do_set($fh, $m->{key}, $m->{data}, $m->{request_id});
 		} elsif ($m->{command} eq "get") {
 			$self->do_get($fh, $m->{key}, $m->{request_id});
+		} elsif ($m->{command} eq "delete") {
+			$self->do_delete($fh, $m->{key}, $m->{request_id});
+		} elsif ($m->{command} eq "rehash") {
+			$self->do_rehash($fh, $m->{request_id});
+		} else {
+			$self->{log}->log("got unknown command $m->{command}");
 		}
 	}
 
@@ -117,7 +129,44 @@ sub do_get {
 			$self->{client_callback}->([$fh]);		
 		}
 	);
+}
 
+sub do_rehash {
+	my ($self, $fh, $client_rid) = @_;
+	my $rid = $self->getRID();
+
+	$self->{kv}->rehash(sub {
+			my $v = shift;
+			$self->{log}->log("got notified of rehash being done");
+			my $r = to_json({
+				command => "rehash_ok",	
+				request_id => $client_rid,
+			});
+			push (@{$self->{return_values}->{$fh}}, $r);
+			$self->{client_callback}->([$fh]);		
+		}
+	);
+}
+
+
+sub do_delete {
+	my ($self, $fh, $key, $client_rid) = @_;
+	my $rid = $self->getRID();
+
+	$self->{log}->log("delete >>$key<< id $client_rid");
+
+	$self->{kv}->delete($key, sub {
+			my $v = shift;
+			my $r = to_json({
+				command => "delete_ok",	
+				key => $key,
+				data => $v,
+				request_id => $client_rid,
+			});
+			push (@{$self->{return_values}->{$fh}}, $r);
+			$self->{client_callback}->([$fh]);		
+		}
+	);
 }
 
 sub get_data {

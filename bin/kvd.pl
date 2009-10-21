@@ -29,6 +29,10 @@ my $confPath = $ARGV[0];
 require $confPath;
 $config = $Config::config;
 
+my $cluster = $Config::cluster;
+my $pending_cluster = $Config::pending_cluster;
+my $cluster_state = $Config::cluster_state;
+
 # background, if wanted.
 unless(check_pid_file("/var/run/" . $config->{dname} . ".pid")) { print $config->{dname} . " already running- aborting"; exit; }
 $config->{daemonize} && daemonize('nobody','nobody',"/var/run/".$config->{dname}.".pid"); 
@@ -50,6 +54,9 @@ $listener->{application} = MyKVApp->new(
 	$config->{dbdb},
 	$config->{dbtable},
 	$log,
+	$cluster,
+	$pending_cluster,
+	$cluster_state,
 );
 $listener->{use_push_write} = 0;
 $listener->listen();

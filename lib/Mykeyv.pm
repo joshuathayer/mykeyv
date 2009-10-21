@@ -1,8 +1,5 @@
 package Mykeyv;
 
-# this is the keyval client lib. it connects to a mysql server
-# and queries that DB for key/val data
-#
 # the main points of entry are get(), set(), getSync(), and setSync()
 #
 # CLUSTER INFORMATION
@@ -34,6 +31,7 @@ use Sislog;
 use AnyEvent;
 use AnyEvent::Socket;
 use Data::HexDump;
+use MyKVClient;
 
 # constructor.
 # note that THIS WILL BLOCK CALLING CODE
@@ -76,19 +74,60 @@ sub new {
 	# table we should use. for development, we might want multiple
 	# tables per mysql server
 	$self->{table} = $in->{table};
+
+	# cluster config information
+	$self->{cluster} = $in->{cluster};
+	$self->{pending_cluster} = $in->{pending_cluster};
+	$self->{cluster_state} = $in->{cluster_state};
+
+
 	my $cv = AnyEvent->condvar;
 	$self->{pool}->connect(
 		sub {
-			# $self->{log}->log("connected to local mysql instance");
+			$self->{log}->log("connected to local mysql instance");
 			$cv->send;
 		}
 	);
 	$cv->recv; 
 
+	# we're also a client of our other servers...
+	$self->{kvc} = MyKVClient->new({
+		cluster => $self->{cluster},
+		pending_cluster => $self->{pending_cluster},
+		cluster_state => $self->{cluster_state},
+	});
+
 	my $self = bless($self, $class);
+
+	# just like in the client object, we maintain a Set object, for the consistent hashing
+	# this needs to be maintained for rehashing, and for potetial future things.
+	$self->prep_set("set", $self->{cluster});
+	if (($self->{cluster_state} eq "pending") or ($self->{cluster_state} eq "pending-write")) {
+		$self->prep_set("pending_set", $self->{pending_cluster});
+	}	
+
 	$self->{pool}->{release_cb} = sub { $self->service_queryqueue };
 
 	return $self;
+}
+
+# this is just as in client code. we need to maintain this struct for rehashing.
+sub prep_set {
+	my ($self, $set, $cluster) = @_;
+
+	$self->{log}->log("prepping $set, which has " . scalar(@$cluster) . " members");
+
+	$self->{ $set } = Set::ConsistentHash->new;
+	$self->{ $set }->set_hash_func(\&crc32);
+
+	my $i = 0; my $targets;
+	foreach my $t (@{$cluster}) {
+		$targets->{$i} = 1;
+		$i += 1;
+	}
+	$self->{log}->log("prepped $i members");
+
+	$self->{ $set }->modify_targets( %$targets );	
 }
 
 sub service_queryqueue {
@@ -113,12 +152,13 @@ sub get {
 
 	$self->_getBucket($key, sub {
 		$row = shift;
+
 		$row = $row->[0];
 	
 		if (defined($row)) {
 			if ($row eq "DONE") {
 				# ok this result is done.
-				#$self->{log}->log("DONE in get callback");
+				$self->{log}->log("DONE in get callback");
 				$cb->($val);
 			} else {
 				# whereas this is real data
@@ -138,50 +178,99 @@ sub get {
 	$self->service_queryqueue();
 }
 
+# used by delete() and set(), we look for a bucket (row) for a particular key. 
+# if it exists, we return it as a hash. if not we return an empty hash.
+sub _getBucketIfExists {
+	my ($self, $key, $cb) = @_;
+
+	my $bucket = {};
+	# try to get bucket contents, or return an empty hash if there's nothing in the db
+	$self->_getBucket($key, sub {
+		my $got = shift;
+
+		$got = $got->[0];
+
+		if (defined($got)) {
+			if ($got eq "DONE") {
+				# this is _getBucket telling us it returned all its data...
+				if (scalar(keys(%$bucket))) { 
+					$self->{log}->log("found extant bucket for >>$key<<");
+				} else {
+					$self->{log}->log("no extant bucket for >>$key<<");
+				}
+
+				$cb->($bucket);	
+			} else {
+				# whereas this is _getBucket actually giving us a row
+				$self->{log}->log("found existing bucket for key >>$key<<");
+				$bucket = Storable::thaw($got);
+			}
+		} else {
+			$self->{log}->log("unexpected, empty row for key >>$key<<");
+			$cb->($bucket);
+		}
+
+	});
+
+	$self->service_queryqueue();
+};
+
+sub delete {
+	my ($self, $key, $cb) = @_;
+	
+	$self->{log}->log("delete >>$key<<");
+
+	# try to get bucket contents
+	my ($row, $got);
+	$self->_getBucketIfExists($key, sub {
+		my $bucket = shift;
+
+		if (defined($bucket->{$key})) {
+
+			$self->{log}->log(">>$key<< exists, ready to delete it");
+			delete $bucket->{$key};
+			$row = Storable::freeze($bucket);
+		
+			$self->_setBucket($key, $row, sub {
+				# if we're back here, we've set the proper row in the db
+				#$self->{log}->log("in set callback");
+				$cb->();
+			});
+		} else {
+			$self->{log}->log(">>$key<< doesn't exist, nothing to delete");
+		}
+	});	
+
+	$self->service_queryqueue();
+};
+
 # alert. will *replace* existing values.
 sub set {
 	my ($self, $key, $value, $cb) = @_;
 
 	# try to get bucket contents
 	my ($row, $got);
-	$self->_getBucket($key, sub {
-		$got = shift;
-		$got = $got->[0];
+	$self->_getBucketIfExists($key, sub {
+		my $bucket = shift;
 
-		# this will either remain undef, or be set to the bucket
-		# as it is in the DB.
-		my $bucket;
-		if (defined($got)) {
-			if ($got eq "DONE") {
-				# this is _getBucket telling us it returned all its data...
-				if (defined($row->{$key})) {
+		if (defined($bucket->{$key})) {
 
-					$self->{log}->log("replacing duplicate key >>$key<<");
-					$bucket = $row;
+			$self->{log}->log("replacing duplicate key >>$key<<");
 
-				} else {
-
-					$self->{log}->log("this looks like a new key >>$key<<");
-
-				}
-				$bucket->{$key} = $value;
-				$row = Storable::freeze($bucket);
-		
-				$self->_setBucket($key, $row, sub {
-					# if we're back here, we've set the proper row in the db
-					#$self->{log}->log("in set callback");
-					$cb->();
-				});
-
-			} else {
-				# whereas this is _getBucket actually giving us a row
-				$row = Storable::thaw($got);
-			}
 		} else {
-			$self->{log}->log("unexpected, empty row for key >>$key<<");
-		}
 
-	});
+			$self->{log}->log("this looks like a new key >>$key<<");
+
+		}	
+		$bucket->{$key} = $value;
+		$row = Storable::freeze($bucket);
+		
+		$self->_setBucket($key, $row, sub {
+			# if we're back here, we've set the proper row in the db
+			#$self->{log}->log("in set callback");
+			$cb->();
+		});
+	});	
 
 	$self->service_queryqueue();
 };
@@ -213,16 +302,10 @@ sub setSync {
 	return $v;
 }
 
-
 sub _getBucket {
 	my ($self, $key, $cb) = @_;
 
-	$self->{log}->log("key is $key");
 	my $md5key = md5_base64($key);
-	#$self->{log}->log(HexDump $md5key0);
-	#my $md5key = Sisyphus::Proto::Mysql::esc($md5key0);
-	$self->{log}->log("got back a key of length " . length($md5key));
-	#$self->{log}->log(HexDump $md5key);
 
 	my $q = <<QQ;
 SELECT
@@ -233,21 +316,24 @@ WHERE
 	Thekey = '$md5key'
 QQ
 	push(@{$self->{queryqueue}}, sub {
-		my $ac = $self->{pool}->claim();
-		$ac->{connection}->{protocol}->query(
-			q      => $q,
-			cb     => sub {
-				my $row = shift;
-				if ($row eq "DONE") {
-					$self->{log}->log("got DONE in callback");
-					$self->{pool}->release($ac);
-					$cb->(["DONE"]);
-				} else {
-					$self->{log}->log("got A ROW in callback");
-					$cb->($row);
-				}
-			},
-		);
+		$self->{pool}->claim( sub {
+			my $ac = shift;
+
+			$ac->{protocol}->query(
+				q      => $q,
+				cb     => sub {
+					my $row = shift;
+					if ($row->[0] eq "DONE") {
+						#$self->{log}->log("got DONE in callback");
+						$self->{pool}->release($ac);
+						$cb->(["DONE"]);
+					} else {
+						#$self->{log}->log("got A ROW in callback");
+						$cb->($row);
+					}
+				},
+			);
+		});
 	});
 
 	$self->service_queryqueue();
@@ -256,7 +342,6 @@ QQ
 sub _setBucket {
 	my ($self, $key, $value, $cb) = @_;
 
-	#my $md5key = Sisyphus::Proto::Mysql::esc(md5($key));
 	my $md5key = md5_base64($key);
 	$value = Sisyphus::Proto::Mysql::esc($value);
 
@@ -268,21 +353,102 @@ SET
 ON DUPLICATE KEY UPDATE
 	TheValue = '$value'
 QQ
-	$self->{log}->log("in _setBucket");
+	#$self->{log}->log("in _setBucket");
 	push(@{$self->{queryqueue}}, sub {
-		$self->{log}->log("in queryqueue callback.");
-		my $ac = $self->{pool}->claim();
-		$ac->{connection}->{protocol}->query(
-			q      => $q,
-			cb     => sub {
-				my $row = shift;
-				$self->{pool}->release($ac);
-				$cb->($row);
-			},
-		);
+		#$self->{log}->log("in queryqueue callback.");
+		$self->{pool}->claim(sub {
+			my $ac = shift;
+			$ac->{protocol}->query(
+				q      => $q,
+				cb     => sub {
+					my $row = shift;
+					$self->{pool}->release($ac);
+					$cb->($row);
+				},
+			);
+		});
 	});
 
 	$self->service_queryqueue();
 } 
+
+sub rehash {
+	my ($self, $cb) = @_;
+	
+	# select every row in our table!
+	my $q = <<QQ;
+SELECT
+	TheValue
+FROM
+	$self->{table}
+QQ
+	my $pending = 0;
+	my $seenDone = 0;
+
+	push(@{$self->{queryqueue}}, sub {
+		$self->{pool}->claim(sub {
+			my $ac = shift;
+
+			$self->{log}->log("within claim callback. going to query.");
+
+			$ac->{protocol}->query(
+				q      => $q,
+				cb     => sub {
+					my $row = shift;
+					$row = $row->[0];
+
+					if ($row eq "DONE" ) {
+						$seenDone = 1;
+					} else {
+						$pending += 1;
+						$self->{log}->log("got a row in rehash.");
+	
+						my $bucket = Storable::thaw($row);
+	
+						$self->_rehashBucket($bucket, sub {
+							$self->{pool}->release($ac);
+							$pending -= 1;
+						});
+					}
+					if ($seenDone and ($pending == 0)) {
+						$self->{log}->log("got a DONE in rehash and pending==0, calling callback.");
+						$cb->();
+					}
+				},
+			);
+		});	
+	});
+
+	$self->service_queryqueue();
+}
+
+sub _rehashBucket {
+	my ($self, $bucket, $cb) = @_;
+
+	foreach my $key (keys %$bucket) {
+		$self->{log}->log("i'd rehash >>$key<<");
+
+		# figure out what serv this should be on according to new cluster
+		my $serv = $self->{set}->get_target($key);
+		my $pending_serv = $self->{pending_set}->get_target($key);
+
+		if ($serv ne $pending_serv) {
+			$self->{log}->log(">>$key<< hashes to NEW server $serv vs $pending_serv");
+			$self->get($key, sub {
+				my $v = shift;
+				$self->{log}->log("going to try calling >>set $key<< on my client");
+
+				$self->{kvc}->set($key, $v, sub {
+					$self->{log}->log("OK! migrated record.");
+					$cb->();
+				});
+			});
+		} else {
+			$self->{log}->log(">>$key<< hashes to SAME server $serv vs $pending_serv");
+			$cb->();
+		}	
+	}
+
+}
 
 1;

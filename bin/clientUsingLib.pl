@@ -19,9 +19,13 @@ BEGIN {
 
 require $ARGV[0];
 my $cluster = $Config::cluster;
+my $pending_cluster = $Config::pending_cluster;
+my $cluster_state = $Config::cluster_state;
 
 my $kvc = MyKVClient->new({
-	cluster=>$cluster,
+	cluster => $cluster,
+	pending_cluster => $pending_cluster,
+	cluster_state => $cluster_state,
 });
 
 my $cv = AnyEvent->condvar;
@@ -41,9 +45,21 @@ foreach my $key (qw/ringo john joshua jones frank dweezil moonunit dave jimmy mi
 $cv->recv;
 
 my $cv = AnyEvent->condvar;
-$kvc->get("bob", sub {
+$kvc->get("bobby", sub {
 	my $r = shift;
 	print "age is " . $r->{data}->{age} . "\n";
+	print "first name is " . $r->{data}->{first} . "\n";
+	print "last name is " . $r->{data}->{last} . "\n";
+	print "cool? " . $r->{data}->{amICool} . "\n";
+	$cv->send;
+});
+$cv->recv;
+
+my $cv = AnyEvent->condvar;
+$kvc->get("jerry", sub {
+	my $r = shift;
+	print "age is " . $r->{data}->{age} . "\n";
+	print "first name is " . $r->{data}->{first} . "\n";
 	print "last name is " . $r->{data}->{last} . "\n";
 	print "cool? " . $r->{data}->{amICool} . "\n";
 	$cv->send;
