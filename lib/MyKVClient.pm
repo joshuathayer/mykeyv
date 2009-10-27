@@ -237,15 +237,19 @@ sub rehash {
 
 	my $rehashers = scalar(@{$self->{cluster}});
 
+	$self->{log}->log("i see $rehashers rehashers");
+
 	foreach my $serv (@{$self->{cluster}}) {
 
 		my $rac = $serv->{ac};
 		my $request_id = $self->get_request_id();
 
+		$self->{log}->log("asking server $serv to rehash");
+
 		$self->{data_callbacks}->{$request_id} = sub {
 			$rehashers = $rehashers - 1;
 
-			$self->{log}->log("server $serv reported being done with rehash");
+			$self->{log}->log("server $serv reported being done with rehash, $rehashers to go");
 
 			if ($rehashers == 0) {	
 				$self->{log}->log("i think i'm done with all my rehashing.");

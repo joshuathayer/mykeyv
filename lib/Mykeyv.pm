@@ -230,12 +230,16 @@ sub delete {
 			$self->{log}->log(">>$key<< exists, ready to delete it");
 			delete $bucket->{$key};
 			$row = Storable::freeze($bucket);
-		
+	
+			# if the bucket is empty, it's likely we want to delete from the db
+			# rather than set an empty row. TODO	
+			# something along the lines of unless (scalar(keys($%bucket))) { _DELETE } else {
 			$self->_setBucket($key, $row, sub {
 				# if we're back here, we've set the proper row in the db
 				#$self->{log}->log("in set callback");
 				$cb->();
 			});
+
 		} else {
 			$self->{log}->log(">>$key<< doesn't exist, nothing to delete");
 		}
@@ -382,12 +386,13 @@ SELECT
 FROM
 	$self->{table}
 QQ
-	my $pending = 0;
 	my $seenDone = 0;
 
 	push(@{$self->{queryqueue}}, sub {
 		$self->{pool}->claim(sub {
 			my $ac = shift;
+
+			my $pending = 0;
 
 			$self->{log}->log("within claim callback. going to query.");
 
@@ -399,17 +404,25 @@ QQ
 
 					if ($row eq "DONE" ) {
 						$seenDone = 1;
+						$self->{log}->log("got a DONE in rehash, pending $pending");
 					} else {
+						# a row from the db. we deserialize it and rehash
+						# anything within it
 						$pending += 1;
-						$self->{log}->log("got a row in rehash.");
-	
+
+						$self->{log}->log("got a row in rehash, pending $pending");
 						my $bucket = Storable::thaw($row);
 	
 						$self->_rehashBucket($bucket, sub {
 							$self->{pool}->release($ac);
 							$pending -= 1;
+							if ($seenDone and ($pending == 0)) {
+								$self->{log}->log("got a WEDGY DONE in rehash and pending==0, calling callback.");
+								$cb->();
+							}
 						});
 					}
+
 					if ($seenDone and ($pending == 0)) {
 						$self->{log}->log("got a DONE in rehash and pending==0, calling callback.");
 						$cb->();
@@ -424,6 +437,11 @@ QQ
 
 sub _rehashBucket {
 	my ($self, $bucket, $cb) = @_;
+
+	unless (scalar(keys(%$bucket))) {
+		$self->{log}->log("zero-size bucket rasta!");
+		$cb->();
+	}
 
 	foreach my $key (keys %$bucket) {
 		$self->{log}->log("i'd rehash >>$key<<");
