@@ -1,6 +1,24 @@
-Mykeyv intends to be a distributed, mysql-backed key/value store.
+Mykeyv is a clustered, MySQL-backed key/value store.
 
-It requires the Sisyphus library: http://github.com/joshuathayer/sisyphus/ 
+MySQL? Yes. While it's not sexy, MySQL is a known quantity for many organizations. Many shops have extensive experience with its installation, administration, and maintenance. Letting MySQL do the heavy lifting allows us to create a simple layer atop it which implements features to provide a key/value store.
+
+Mykeyv has a client and server component. The server is a daemon process that runs on the same physical machine as a MySQL daemon. The client is a library which provides a simple API to the aplication programmer. 
+
+Mykeyv expects to run in a clustered environment of some number of physical machines. Each machine runs an instance of MySQL and a Mykeyv daemon. All access to the Mykeyv table is mediated by the Mykeyv daemon. Data is horizontally partitioned across all nodes of the cluster. Redundancy is provided by MySQL's own master/slave replication.
+
+Nodes may be added to a Mykeyv cluster at any time, at which time the corpus is rehashed and some subset of the corpus will be moved onto the new nodes (consistent hashing is used, so on average N/(N+M) buckets will be moved, where N is the number of new nodes and M is the number of existing nodes... adding one machine to a cluster of 4 machines will require 1/5 of all records to be moved). 
+
+The client library provides a simple set of operations. Besides the typical setup operations, get(), set(), delete(), and rehash() are provided. Forthcoming will be an update() method, which will allow arbitrary code be executed on records, the result of which may or may not be stored.
+
+$kvc->update(\@arrayOfRecordIDs, sub {
+	my $r = shift;
+	if ($r->{salary} < 100000) {
+		$r->{salary} = 100000;
+		return $r;
+	} else {
+		return undef;
+	}
+});
 
 Very trivial example:
 

@@ -267,6 +267,96 @@ sub rehash {
 
 }
 
+# see readme. run code on remote servers to modify records in the db.
+sub update {
+	my ($self, $keys, $code, $cb) = @_;
+
+	# we're allowing arbitrary code be run on remote servers, upon some arbitrary 
+	# and potentially larege number of keys
+	# we don't want to recompile the code remotely on each invocation,
+	# so we need some way of "sessioning" the request so we can say "compile this code",
+	# now run it on all this stuff. now get rid of it.
+
+	my $servs;
+	my $total_keys_ever = scalar(@$keys);
+	my $total_updates_done = 0;
+
+	# gather up list of servers we're interested in, organize list of keys by server
+	foreach my $key (@$keys) {
+		# sort in to buckets...
+		my $serv = $self->{set}->get_target($key);
+		$servs->{$serv}->{ac} = $self->{cluster}->[$serv]->{ac};
+		$servs->{$serv}->{compiled} = 0;
+		push(@{$servs->{$serv}->{keys}}, $key);
+	}
+	
+	# ask them to compile the the code...	
+
+	foreach my $serv (keys(%{$servs})) {
+
+		my $compile_request_id = $self->get_request_id();
+
+		$self->{data_callbacks}->{$compile_request_id} = sub {
+			my $remote_code_id = shift;
+
+			# ohkay. this particular server has compiled the code, and given us
+			# an id with which to refer to the remotely-compiled code
+			# we ask it to run the code on each object in turn...
+
+			my $this_server_updates_done = 0;
+			my $this_server_keys = scalar(@{$servs->{$serv}->{keys}});
+
+			# actually send all the update requests. the code is compiled, we just
+			# send a ref to it. we do this serially instead of in a batch so the client
+			# can control the rate of injection. not sure that's the right way, maybe
+			# we should send the server a whole array of keys
+			foreach my $k (@{$servs->{$serv}->{keys}}) {
+
+				my $execute_request_id = $self->get_request_id();
+				$self->{data_callbacks}->{$execute_request_id} = sub {
+					# this gets called when the remote server is done updating
+					# a single record
+
+					$this_server_updates_done += 1;
+					$total_updates_done += 1;
+					if ($this_server_updates_done == $this_server_keys) {
+						$self->{log}->log("this server is done with all its updates");
+						# here's where you'd ask the server to remove its compiled code
+					} else {
+						$self->{log}->log("this server is done with $this_server_updates_done of $this_server_keys updates");
+					}
+					
+					if ($total_updates_done == $total_keys_ever) {
+						$self->{log}->log("i believe i'm done with all my updates across all servers");
+						$cb->();
+					} else {
+						$self->{log}->log("i'm done with $total_updates_done of $total_keys_ever updates");
+					}
+				};
+
+				my $o = to_jason({
+					command => "execute",
+					code_id => $remote_code_id,
+					request_id => $execute_request_id,
+					key => $k,
+				});
+				$self->send($servs->{$serv}->{ac}, $o);
+			}
+
+		};
+
+		# ok, actually send the compile request, which will set in to action all the 
+		# things above.
+		my $o = to_json({
+			command => "compile",
+			code => $code,
+			request_id => $compile_request_id,
+		});
+	
+		$self->send($servs->{serv}->{ac}, $o);
+	}
+}
+
 sub set {
 	my ($self, $key, $val, $cb) = @_;
 	$self->{log}->log("setting >>$key<<");

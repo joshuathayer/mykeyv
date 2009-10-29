@@ -83,11 +83,23 @@ sub message {
 			$self->do_delete($fh, $m->{key}, $m->{request_id});
 		} elsif ($m->{command} eq "rehash") {
 			$self->do_rehash($fh, $m->{request_id});
+		} elsif ($m->{command} eq "compile") {
+			$self->do_compile($fh, $m->{code}, $m->{request_id});
+		} elsif ($m->{command} eq "execute") {
+			$self->do_execute($fh, $m->{code_id}, $m->{key}, $m->{request_id});
 		} else {
 			$self->{log}->log("got unknown command $m->{command}");
 		}
 	}
 
+}
+
+sub do_update {
+	my ($self, $fh, $code, $client_rid) = @_;
+}
+
+sub do_execute {
+	my ($sel, $fh, $code_id, $key, $client_rid) = @_;
 }
 
 sub do_set {
