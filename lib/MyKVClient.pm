@@ -271,6 +271,8 @@ sub rehash {
 sub update {
 	my ($self, $keys, $code, $cb) = @_;
 
+	$self->{log}->log("in UPDATE!");
+
 	# we're allowing arbitrary code be run on remote servers, upon some arbitrary 
 	# and potentially larege number of keys
 	# we don't want to recompile the code remotely on each invocation,
@@ -283,6 +285,8 @@ sub update {
 
 	# gather up list of servers we're interested in, organize list of keys by server
 	foreach my $key (@$keys) {
+		
+		$self->{log}->log("key $key!");
 		# sort in to buckets...
 		my $serv = $self->{set}->get_target($key);
 		$servs->{$serv}->{ac} = $self->{cluster}->[$serv]->{ac};
@@ -291,13 +295,17 @@ sub update {
 	}
 	
 	# ask them to compile the the code...	
+	$self->{log}->log(Dumper $servs);
 
 	foreach my $serv (keys(%{$servs})) {
 
-		my $compile_request_id = $self->get_request_id();
+		my $evaluate_request_id = $self->get_request_id();
 
-		$self->{data_callbacks}->{$compile_request_id} = sub {
-			my $remote_code_id = shift;
+		$self->{data_callbacks}->{$evaluate_request_id} = sub {
+			my $r = shift;
+			my $remote_code_id = $r->{remote_code_id};
+
+			$self->{log}->log("in evaluate callback, code $remote_code_id");
 
 			# ohkay. this particular server has compiled the code, and given us
 			# an id with which to refer to the remotely-compiled code
@@ -312,8 +320,8 @@ sub update {
 			# we should send the server a whole array of keys
 			foreach my $k (@{$servs->{$serv}->{keys}}) {
 
-				my $execute_request_id = $self->get_request_id();
-				$self->{data_callbacks}->{$execute_request_id} = sub {
+				my $apply_request_id = $self->get_request_id();
+				$self->{data_callbacks}->{$apply_request_id} = sub {
 					# this gets called when the remote server is done updating
 					# a single record
 
@@ -334,12 +342,13 @@ sub update {
 					}
 				};
 
-				my $o = to_jason({
-					command => "execute",
+				my $o = to_json({
+					command => "apply",
 					code_id => $remote_code_id,
-					request_id => $execute_request_id,
+					request_id => $apply_request_id,
 					key => $k,
 				});
+				$self->{log}->log("serv is $serv, ac is $servs->{$serv}->{ac}");
 				$self->send($servs->{$serv}->{ac}, $o);
 			}
 
@@ -348,12 +357,12 @@ sub update {
 		# ok, actually send the compile request, which will set in to action all the 
 		# things above.
 		my $o = to_json({
-			command => "compile",
+			command => "evaluate",
 			code => $code,
-			request_id => $compile_request_id,
+			request_id => $evaluate_request_id,
 		});
 	
-		$self->send($servs->{serv}->{ac}, $o);
+		$self->send($servs->{$serv}->{ac}, $o);
 	}
 }
 

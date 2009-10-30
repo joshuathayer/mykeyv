@@ -75,6 +75,7 @@ sub message {
 
 	foreach my $m (@$message) {
 		$m = from_json($m);
+		$self->{log}->log("command $m->{command}");
 		if ($m->{command} eq "set") {
 			$self->do_set($fh, $m->{key}, $m->{data}, $m->{request_id});
 		} elsif ($m->{command} eq "get") {
@@ -83,10 +84,10 @@ sub message {
 			$self->do_delete($fh, $m->{key}, $m->{request_id});
 		} elsif ($m->{command} eq "rehash") {
 			$self->do_rehash($fh, $m->{request_id});
-		} elsif ($m->{command} eq "compile") {
-			$self->do_compile($fh, $m->{code}, $m->{request_id});
-		} elsif ($m->{command} eq "execute") {
-			$self->do_execute($fh, $m->{code_id}, $m->{key}, $m->{request_id});
+		} elsif ($m->{command} eq "evaluate") {
+			$self->do_evaluate($fh, $m->{code}, $m->{request_id});
+		} elsif ($m->{command} eq "apply") {
+			$self->do_apply($fh, $m->{code_id}, $m->{key}, $m->{request_id});
 		} else {
 			$self->{log}->log("got unknown command $m->{command}");
 		}
@@ -94,12 +95,54 @@ sub message {
 
 }
 
-sub do_update {
-	my ($self, $fh, $code, $client_rid) = @_;
+
+sub do_apply {
+	my ($self, $fh, $code_id, $key, $client_rid) = @_;
+
+	# ok rad.
+	$self->{log}->log("do apply, code id $code_id key $key");
+
+	$self->{kv}->apply($code_id, $key, sub {
+		my $result = shift;
+		# actually check return values, pls
+
+		my $r = to_json({
+			command => "apply_ok",
+			request_id => $client_rid,
+		});
+
+		push (@{$self->{return_values}->{$fh}}, $r);
+		$self->{client_callback}->([$fh]);		
+	});
 }
 
-sub do_execute {
-	my ($sel, $fh, $code_id, $key, $client_rid) = @_;
+sub do_evaluate {
+	my ($self, $fh, $code_scalar, $client_rid) = @_;
+
+	my $runme = "my \$s = sub { $code_scalar }; return \$s;";
+	my $sub;
+	eval {
+		$sub = eval $runme;
+	};
+	# check $@ and $! here. deal if needed.
+
+	# no reason this should block, no need to do it async'ly
+	my $code_id = $self->{kv}->set_evaluated($sub);
+
+	$self->{log}->log("code id $code_id");
+
+	# ok even though nothing has blocked, we return to our client using a callback
+	# in the future, we might want to do eval's in their own processes, to guard against
+	# long-running failures or something
+
+	my $r = to_json({
+		command => "evaluate_ok",
+		request_id => $client_rid,
+		remote_code_id => $code_id,
+	});
+
+	push (@{$self->{return_values}->{$fh}}, $r);
+	$self->{client_callback}->([$fh]);		
 }
 
 sub do_set {

@@ -52,6 +52,10 @@ sub new {
 	# query counter. internal index of queries
 	$self->{qc} = 0;
 
+	# keep track of subs our clients can set within us
+	$self->{code_id} = 1;
+	$self->{applicables} = {};
+
 	# query queue. 
 	$self->{queryqueue} = [];
 
@@ -140,6 +144,36 @@ sub service_queryqueue {
 		}
 	}
 
+}
+
+# set a function that can be remotely called and acts on data in the db
+sub set_evaluated {
+	my ($self, $sub) = @_;
+
+	my $id = $self->{code_id};
+	$self->{code_id} += 1;
+	$self->{applicables}->{$id} = $sub;
+
+	return $id;
+}
+
+sub apply {
+	my ($self, $code_id, $key, $cb) = @_;
+
+	$self->get($key, sub {
+		my $record = shift;
+
+		# make this much more robust
+		$self->{log}->log(Dumper $record);
+		my $res = $self->{applicables}->{$code_id}->($record);
+		$self->{log}->log(Dumper $record);
+		if ($res) {
+			# want to do set here, please
+			$self->set($key, $record, sub { $cb->(1); });
+		} else {
+			$cb->(0);
+		}
+	});
 }
 
 sub get {

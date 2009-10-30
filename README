@@ -10,14 +10,9 @@ Nodes may be added to a Mykeyv cluster at any time, at which time the corpus is 
 
 The client library provides a simple set of operations. Besides the typical setup operations, get(), set(), delete(), and rehash() are provided. Forthcoming will be an update() method, which will allow arbitrary code be executed on records, the result of which may or may not be stored.
 
-$kvc->update(\@arrayOfRecordIDs, sub {
-	my $r = shift;
-	if ($r->{salary} < 100000) {
-		$r->{salary} = 100000;
-		return $r;
-	} else {
-		return undef;
-	}
+$kvc->update(\@arrayOfRecordIDs, 
+	"my \$r = shift; if (\$r->{salary} < 100000) { \$r->{salary} = 100000; return 1; }", 
+	sub { print "update done!\n"; cb->(); }
 });
 
 Very trivial example:
