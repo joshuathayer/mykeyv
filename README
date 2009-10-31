@@ -12,11 +12,6 @@ The client library provides a simple set of operations. Besides the typical setu
 
 The the Mykeyv world, keys are any scalar, and records are a ref to any perl variable (Storable is used behind the scenes to serialize data).
 
-$kvc->update(\@arrayOfRecordIDs, 
-	"my \$r = shift; if (\$r->{salary} < 100000) { \$r->{salary} = 100000; return 1; }", 
-	sub { print "update done!\n"; cb->(); }
-});
-
 Mykeyv uses the Sisyphus library, which uses the AnyEvent library for async, event-based program flow. For the application programmer, program control happens much as it would in a typical AnyEvent program (for example, using AnyEvent's control variables). The client makes heavy use of callbacks for returning data to the caller.
 
 A few examples using the client library. Recall that the client will determine which server to actually go to when storing or retrieving the record- these examples could be run on a cluster of one or very many physical machines running the Mykeyv daemon and MySQL instance.
