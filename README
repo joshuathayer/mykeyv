@@ -1,86 +1,75 @@
 Mykeyv is a clustered, MySQL-backed key/value store.
 
-MySQL? Yes. While it's not sexy, MySQL is a known quantity for many organizations. Many shops have extensive experience with its installation, administration, and maintenance. Letting MySQL do the heavy lifting allows us to create a simple layer atop it which implements features to provide a key/value store.
+MySQL? Yes. While it's not sexy, MySQL is a known quantity for many organizations. Many shops have extensive experience with its installation, administration, and maintenance. Letting MySQL do the heavy storage lifting allows us to create a simple layer atop it which implements features to provide a key/value store.
 
-Mykeyv has a client and server component. The server is a daemon process that runs on the same physical machine as a MySQL daemon. The client is a library which provides a simple API to the aplication programmer. 
+Mykeyv has a client and server component. The server is a daemon process that runs on the same physical machine as a MySQL daemon. The client is a library which provides a simple API to the aplication programmer. The client contacts appropriate servers for gets, sets, and updates.
 
 Mykeyv expects to run in a clustered environment of some number of physical machines. Each machine runs an instance of MySQL and a Mykeyv daemon. All access to the Mykeyv table is mediated by the Mykeyv daemon. Data is horizontally partitioned across all nodes of the cluster. Redundancy is provided by MySQL's own master/slave replication.
 
-Nodes may be added to a Mykeyv cluster at any time, at which time the corpus is rehashed and some subset of the corpus will be moved onto the new nodes (consistent hashing is used, so on average N/(N+M) buckets will be moved, where N is the number of new nodes and M is the number of existing nodes... adding one machine to a cluster of 4 machines will require 1/5 of all records to be moved). 
+Nodes may be added to a Mykeyv cluster at any time. Modifying the cluster size requires a rehashing of the corpus. Some subset of the cluster's data will be moved onto the new nodes (consistent hashing is used, so on average N/(N+M) buckets will be moved, where N is the number of new nodes and M is the number of existing nodes... adding one machine to a cluster of 4 machines will require 1/5 of all records to be moved). 
 
-The client library provides a simple set of operations. Besides the typical setup operations, get(), set(), delete(), and rehash() are provided. Forthcoming will be an update() method, which will allow arbitrary code be executed on records, the result of which may or may not be stored.
+The client library provides a simple set of operations. Besides the typical setup operations, get(), set(), delete(), and rehash() are provided. There is also an update() method, which allows arbitrary code be executed on records, the result of which may or may not be stored.
+
+The the Mykeyv world, keys are any scalar, and records are a ref to any perl variable (Storable is used behind the scenes to serialize data).
 
 $kvc->update(\@arrayOfRecordIDs, 
 	"my \$r = shift; if (\$r->{salary} < 100000) { \$r->{salary} = 100000; return 1; }", 
 	sub { print "update done!\n"; cb->(); }
 });
 
-Very trivial example:
+Mykeyv uses the Sisyphus library, which uses the AnyEvent library for async, event-based program flow. For the application programmer, program control happens much as it would in a typical AnyEvent program (for example, using AnyEvent's control variables). The client makes heavy use of callbacks for returning data to the caller.
 
-	# instantiate handle
-    my $kv = Mykeyv->new({
-        'host' => "127.0.0.1",
-        'port' => 3306,
-        'user' => 'keyvalue',
-        'pw' => 'password',
-        'db' => 'keyvalue',
-    });
+A few examples using the client library. Recall that the client will determine which server to actually go to when storing or retrieving the record- these examples could be run on a cluster of one or very many physical machines running the Mykeyv daemon and MySQL instance.
 
-	# create an object to store
-	my $object = {
-		first => "John",
-		last => "Bonham",
-		band => "Zeppelin",
-		albums => [
-			"Houses of the Holy","IV"
-		],
-	};
+# setting a record. the 'set' method requires the key, the record, and
+# a callback to be called when the record is set
+my $cv = AnyEvent->condvar;
+$kvc->set('jerry',
+	{ first => 'jerry',
+	  last => 'garcia',
+	  band => 'grateful dead',
+	},
+	sub { print "jerry record set!\n"; $cv->send; }
+);
+$cv->recv;
 
-	# set object in store
-	$kv->set("bonham", $object, sub { print "set object\n"; });
+# getting a record
+my $jerry;
+$kvc->get('jerry', sub { $jerry = shift; $cv->send; });
+$cv->recv;
+print "jerry played for the $jerry->{band}\n";
 
-	# retrieve object from store
-	$kv->get("bonham", sub { my $object = shift; print Dumper $object; });
+# updating some number of records
+# this is a bit of a tortured example.
+# given a hash of the mortal status of some members of the grateful
+# dead, go out and update their k/v records. recall that this code will
+# be run on the machine local to the data- that is, the records never
+# traverse the wire. arbitrarily complex logic can be run on the data.
 
-Also included is a first stab at a network wrapper for this service, in bin/kvd.pl. It speaks the sisyphus "trivial" protocol, and expects commands in json, as shown:
+my @living = ('phil','bobby','bill');
+my @not_living = ('jerry','pigpen');
+my $dead_or_alive = {
+	'phil' => 'living',
+	'jerry' => 'dead',
+	'bobby' => 'living',
+	'pigpen' => 'dead',
+};
+my @the_dead = keys(%$dead_or_alive);
+$kvc->update(
+	\@the_dead,
 
-	my $ac  = new Sisyphus::Connector;
-	$ac->{host} = "127.0.0.1";
-	$ac->{port} = 8889;
-	$ac->{protocolName} = "Trivial";
+	# a scalar representing the code that should be run
+	"my \$record = shift;" .
+	"if (\$dead_or_alive->{ \$record->{first} } eq 'dead') {" .
+	"    \$record->{status} = 'dead';" .	
+	"} else {" .
+	"    \$record->{status} = 'alive';" .
+	"}".
+	"return 1;",
 
-	$ac->{app_callback} = sub {
-	    my $message = shift;
-	    print "i received a message from kv daemon:\n";
-	    print $message . "\n";
-	};
-
-	# set a record
-	my $message = {
-	    command => "set",
-	    key => "bonham",
-	    data => {
-	        first => "John",
-	        last => "Bonham",
-	        band => "Zeppelin",
-	        albums => [
-	            "Houses of the Holy","IV"
-	        ],
-	    },
-	};
-
-	$ac->send(to_json($o));
-
-	# get a record
-	# in this case, we add a request_id, which will be returned to us
-	# in the result set. which allows us to keep track of queries and they
-	# return. probably, ideally, we'd be able to spec a callback here instead
-	my $json = to_json($o = {
-		command => "get",
-		key => "bonham",
-		request_id => 1,
-	});
-
-	$ac->send($json);
-
-Actually, shit works great.
+	# the callback, will be executed when all updates are done
+	sub {
+		print "all records updated!\n"; $cv->send;
+	}
+);
+$cv->recv;
