@@ -37,10 +37,11 @@ print "jerry played for the $jerry->{band}\n";
 # updating some number of records
 # this is a bit of a tortured example.
 # make sure everyone in the band makes at least $100 / show
-# recall that this code will # be run on the machine local to the data-
+# recall that this code will be run on the machine local to the data-
 # that is, the records never traverse the wire. arbitrarily complex
 # logic can be run on the data.
 
+my $cv = AnyEvent->condvar;
 my @the_dead = ('phil','bobby','bill','jerry','pigpen');
 $kvc->update(
 	\@the_dead,
