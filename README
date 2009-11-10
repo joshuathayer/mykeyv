@@ -36,29 +36,19 @@ print "jerry played for the $jerry->{band}\n";
 
 # updating some number of records
 # this is a bit of a tortured example.
-# given a hash of the mortal status of some members of the grateful
-# dead, go out and update their k/v records. recall that this code will
-# be run on the machine local to the data- that is, the records never
-# traverse the wire. arbitrarily complex logic can be run on the data.
+# make sure everyone in the band makes at least $100 / show
+# recall that this code will # be run on the machine local to the data-
+# that is, the records never traverse the wire. arbitrarily complex
+# logic can be run on the data.
 
-my @living = ('phil','bobby','bill');
-my @not_living = ('jerry','pigpen');
-my $dead_or_alive = {
-	'phil' => 'living',
-	'jerry' => 'dead',
-	'bobby' => 'living',
-	'pigpen' => 'dead',
-};
-my @the_dead = keys(%$dead_or_alive);
+my @the_dead = ('phil','bobby','bill','jerry','pigpen');
 $kvc->update(
 	\@the_dead,
 
 	# a scalar representing the code that should be run
 	"my \$record = shift;" .
-	"if (\$dead_or_alive->{ \$record->{first} } eq 'dead') {" .
-	"    \$record->{status} = 'dead';" .	
-	"} else {" .
-	"    \$record->{status} = 'alive';" .
+	"if (\$record->{rate_per_show} < 100) {" .
+	"    \$record->{rate_per_show} = 100;" .	
 	"}".
 	"return 1;",
 
