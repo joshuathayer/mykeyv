@@ -1,3 +1,6 @@
 Sys::Syslog
 Log::Syslog::Fast
 Net::Server::Daemonize
+Set::ConsistentHash
+String::CRC32
+Data::HexDump
