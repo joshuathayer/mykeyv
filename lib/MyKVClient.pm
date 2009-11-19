@@ -7,7 +7,7 @@ use strict;
 use AnyEvent::Strict;
 use Sisyphus::Connector;
 use Sislog;
-use JSON;
+use JSON "-convert_blessed_universally";
 use Data::Dumper;
 
 use Set::ConsistentHash;
@@ -207,14 +207,13 @@ sub _get {
 
 	my $request_id = $self->get_request_id();
 	$self->{data_callbacks}->{$request_id} = $cb;
-
-	my $j = to_json({
+	my $j = new JSON;
+	my $jj = $j->encode({
 		command => "get",
 		key => $key,
 		request_id => $request_id,
 	});
-	
-	$self->send($ac, $j);
+	$self->send($ac, $jj);
 }
 
 # should properly be called "connectAndSend", tries to connect to the ac if it's not connected
@@ -409,13 +408,16 @@ sub set {
 	my $request_id = $self->get_request_id();
 	$self->{data_callbacks}->{$request_id} = $cb;
 
-	my $o = to_json({
+	my $j = new JSON;
+	$j->allow_blessed();
+	$j->convert_blessed();
+	my $o = $j->encode({
 		command => "set",
 		key => $key,
 		data => $val,
 		request_id => $request_id,
 	});
-	
+	# print "json $o\n";	
 	$self->send($ac, $o);
 }
 
