@@ -1,4 +1,4 @@
-package MyKVClient;
+package Mykeyv::MyKVClient;
 
 # MyKV client library.
 

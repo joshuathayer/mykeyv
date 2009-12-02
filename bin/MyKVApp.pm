@@ -4,11 +4,8 @@ package MyKVApp;
 # uses the Keyv lib to do the actual talking to Mysql
 # is used by kvd, and is an App in the Sisyphus framework sense
 
-use lib ("/home/joshua/projects/sisyphus/lib");
-use lib ("/home/joshua/projects/keyv/lib");
-
 use strict;
-use Mykeyv;
+use Mykeyv::Mykeyv;
 use Data::Dumper;
 use JSON;
 use Set::ConsistentHash;
@@ -30,7 +27,7 @@ sub new {
 	$self->{rid} = 0;
 	$self->{log} = $log;
 
-	my $kv = Mykeyv->new({
+	my $kv = Mykeyv::Mykeyv->new({
 		'host' => $dbip, # "127.0.0.1",
 		'port' => $dbport, # 3306,
 		'user' => $dbuser, # 'keyvalue',

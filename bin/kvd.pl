@@ -1,12 +1,6 @@
 #!/usr/bin/perl
 
 use strict;
-use lib ('/Users/joshua/projects/sisyphus/lib');
-use lib ('/Users/joshua/projects/mykeyv/lib');
-use lib ('/home/joshua/projects/sisyphus/lib');
-use lib ('/home/joshua/projects/mykeyv/lib');
-
-
 
 BEGIN {
 	if ($#ARGV < 0) {

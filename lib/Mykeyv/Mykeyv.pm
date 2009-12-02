@@ -1,4 +1,4 @@
-package Mykeyv;
+package Mykeyv::Mykeyv;
 
 # the main points of entry are get(), set(), getSync(), and setSync()
 #
@@ -31,7 +31,7 @@ use Sislog;
 use AnyEvent;
 use AnyEvent::Socket;
 use Data::HexDump;
-use MyKVClient;
+use Mykeyv::MyKVClient;
 
 # constructor.
 # note that THIS WILL BLOCK CALLING CODE
@@ -95,7 +95,7 @@ sub new {
 	$cv->recv; 
 
 	# we're also a client of our other servers...
-	$self->{kvc} = MyKVClient->new({
+	$self->{kvc} = Mykeyv::MyKVClient->new({
 		cluster => $self->{cluster},
 		pending_cluster => $self->{pending_cluster},
 		cluster_state => $self->{cluster_state},
