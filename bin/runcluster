@@ -11,15 +11,13 @@ if ($ARGV[0] eq "start") {
 	`./kvd.pl ./kvd1.conf`;
 	`./kvd.pl ./kvd2.conf`;
 	`./kvd.pl ./kvd3.conf`;
-	`./kvd.pl ./kvd4.conf`;
 }
 
 if ($ARGV[0] eq "stop") {
 	`cat /var/run/keyvald0.pid \| xargs kill`;
 	`cat /var/run/keyvald1.pid \| xargs kill`;
-	`cat /var/run/keyvald2.pid\| xargs kill`;
-	`cat /var/run/keyvald3.pid\| xargs kill`;
-	`cat /var/run/keyvald4.pid\| xargs kill`;
+	`cat /var/run/keyvald2.pid \| xargs kill`;
+	`cat /var/run/keyvald3.pid \| xargs kill`;
 }
 
 if ($ARGV[0] eq "kick") {

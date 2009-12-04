@@ -29,7 +29,7 @@ my $cluster_state = $Config::cluster_state;
 
 # background, if wanted.
 unless(check_pid_file("/var/run/" . $config->{dname} . ".pid")) { print $config->{dname} . " already running- aborting"; exit; }
-$config->{daemonize} && daemonize('nobody','nobody',"/var/run/".$config->{dname}.".pid"); 
+$config->{daemonize} && daemonize('nobody','nogroup',"/var/run/".$config->{dname}.".pid"); 
 
 my $log = Sislog->new({use_syslog=>1, facility=>$config->{dname}});
 $log->open();
