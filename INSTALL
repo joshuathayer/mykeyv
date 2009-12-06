@@ -1,11 +1,14 @@
 Getting a development / testing environment going:
 
-get Sisyphus from github
-get mykeyv fromgithub
-install anyevent using your OS's package management tools
+Get sisyphus from github
+Install Sisyphus
+
 use CPAN to install everything in reqs/REQS in both sisyphus and mykev
 
 create a mysql DB using the following recommended values:
+mysql> CREATE DATABASE KeyValue; 
+mysql> GRANT ALL PRIVILEGES ON KeyValue.* to KeyValue@'%' IDENTIFIED BY 'KeyValuePass';
+
 db KeyValue
 user KeyValue
 password KeyValuePass
@@ -13,12 +16,13 @@ password KeyValuePass
 create db tables:
 cat KEYVALUES | mysql -u KeyValue -pKeyValuePass -h localhost KeyValue
 
-edit mykeyv/bin/kvd.pl to add the path to sisyphus/lib/ and mykeyv/lib/ to your perl lib path
-
 configure your syslogd to allow network logging, on ubuntu:
 
-in /etc/default/syslogd, uncomment:
-SYSLOGD="-r"
+In Ubuntu 9.04:
+  /etc/default/syslogd, uncomment:
+  SYSLOGD="-r"
+
+In Ubuntu 9.10 this just works!
 
 in the mykeyv/bin directory, you should be able to run 
 sudo ./runcluster kick
