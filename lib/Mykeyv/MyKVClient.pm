@@ -13,25 +13,44 @@ use Data::Dumper;
 use Set::ConsistentHash;
 use String::CRC32;
 
-sub new {
-	my $class = shift;
-	my $in = shift;
+# OH HAI THIS IS IMPLEMENTED AS A SINGLETON
+my $instance = undef;
 
-	my $self = {
-		set => undef,
-		pending_set => undef,
-		cluster => $in->{cluster},
-		pending_cluster => $in->{pending_cluster},
-		cluster_state => $in->{cluster_state},	# normal | pending | pending-write
-		log => Sislog->new({use_syslog => 1, facility=>"MyKVClient"}),
-		request_id => 0,
-		data_callbacks => {},
-	};
+sub new {
+	my ($class, $in) = @_;
+
+	# if we have been here before ($instance set),
+	# and we are not passing in $in (new connection config),
+	# return the existing instance.
+	if ($instance and not $in) { return $instance };
+
+	# if we have an instance, we're going to want to operate
+	# upon it (open connections and the like).
+	# if we don't have an instance, we're going to create a 
+	# blessed ref, stash it away, and then operate on $self
+	my $self;
+	if ($instance) {
+		$self = $instance;
+	} else {
+		$self = {};
+		bless $self, $class;
+		$instance = $self;
+	}
+
+	# if we were not given config stuff ($in), then we can't 
+	# do much with $self. we return it!
+	unless ($in) { return $self; }
+
+	$self->{set} = undef;
+	$self->{pending_set} = undef;
+	$self->{cluster} = $in->{cluster};
+	$self->{pending_cluster} = $in->{pending_cluster};
+	$self->{cluster_state} = $in->{cluster_state};	# normal | pending | pending-write
+	$self->{log} = Sislog->new({use_syslog => 1, facility=>"MyKVClient"});
+	$self->{request_id} = 0;
+	$self->{data_callbacks} = {};
 
 	$self->{log}->open();
-
-	# bless the object now, so we can call methods on it
-	bless $self, $class;
 
 	$self->prep_set("set", $self->{cluster});
 
@@ -45,6 +64,7 @@ sub new {
 		$self->makeConnections("pending_set");	
 		$self->{log}->log("under second makeConnections");
 	}
+
 	
 	return $self;
 }
@@ -424,6 +444,8 @@ sub set {
 sub get_request_id {
 	my $self = shift;
 	$self->{request_id} += 1;
+
+	$self->{log}->log("KV Client req id $self->{request_id}\n");
 
 	return $self->{request_id};
 }
