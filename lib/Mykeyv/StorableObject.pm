@@ -2,6 +2,7 @@ package Mykeyv::StorableObject;
 use strict;
 use Mykeyv::MyKVClient;
 use Data::Dumper;
+use B::Deparse;
 
 # a parent object that allows its children to store themselves
 
@@ -51,4 +52,55 @@ sub mykvRestore {
 		print Dumper $self;
 		$cb->($self);
 	});
+}
+
+
+sub methods {
+	my ($class, $types) = @_;
+	$class = ref $class || $class;
+	$types ||= '';
+	my %classes_seen;
+	my %methods;
+	my @class = ($class);
+
+	no strict 'refs';
+	while ($class = shift @class) {
+		next if $classes_seen{$class}++;
+		unshift @class, @{"${class}::ISA"} if $types eq 'all';
+		# Based on methods_via() in perl5db.pl
+		for my $method (grep {not /^[(_]/ and 
+			defined &{${"${class}::"}{$_}}} 
+			keys %{"${class}::"}) {
+
+				#my $yeah = $class.'::'.$method;
+				my $yeah = $method;
+				$methods{$yeah} = wantarray ? undef : $class->can($method); 
+		}
+	}
+      
+	wantarray ? keys %methods : \%methods;
+}
+
+
+sub remote {
+	my ($self, $sub) = @_;
+
+	$self = ref $self || $self;
+
+	# wow!
+	# http://www.perlmonks.org/?node_id=62737
+	# http://perldoc.perl.org/5.8.8/B/Deparse.html
+	# http://dev.perl.org/perl6/rfc/335.html
+
+	my @foo = methods($self, 'all');
+
+	my $deparse = B::Deparse->new("-p", "-sC");
+
+	foreach my $f (@foo) {
+		if ($f =~ /mykv_/) {
+			my $ref = $self->can($f);
+			print $deparse->coderef2text($ref);
+		}
+	}
+
 }

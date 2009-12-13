@@ -18,6 +18,14 @@ sub new {
 	return $self;
 }
 
+sub mykv_remote_append {
+	my ($self, $item) = @_;
+
+	unshift(@{$self->{friends}}, $item);
+
+	return 1;
+}
+
 package main;
 
 use Mykeyv::MyKVClient;
@@ -59,3 +67,5 @@ $w->{'first'} = "jerry";
 $w->mykvRestore(sub{$cv->send});
 $cv->recv;
 print "jerry's last name is $w->{last}\n";      # prints "jerry's last name is garcia"
+
+$w->remote("_go_do_this");
