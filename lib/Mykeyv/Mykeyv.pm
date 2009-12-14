@@ -95,6 +95,8 @@ sub new {
 	$cv->recv; 
 
 	# we're also a client of our other servers...
+	# XXX 20091212 new singleton contructor in client may have broken this.
+	# actually. maybe not.
 	$self->{kvc} = Mykeyv::MyKVClient->new({
 		cluster => $self->{cluster},
 		pending_cluster => $self->{pending_cluster},
@@ -158,14 +160,22 @@ sub set_evaluated {
 }
 
 sub apply {
-	my ($self, $code_id, $key, $cb) = @_;
+	my ($self, $code_id, $key, $args, $cb) = @_;
+
+	# we get stuff like:
+	# {
+	#    package FakeUser;
+	#    (my($self, $item) = @_);
+	#    unshift(@{$$self{'friends'};}, $item);
+	#    return(1);
+	# }
 
 	$self->get($key, sub {
 		my $record = shift;
 
 		# make this much more robust
 		$self->{log}->log(Dumper $record);
-		my $res = $self->{applicables}->{$code_id}->($record);
+		my $res = $self->{applicables}->{$code_id}->($record, $args);
 		$self->{log}->log(Dumper $record);
 		if ($res) {
 			# want to do set here, please

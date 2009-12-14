@@ -8,6 +8,54 @@ use B::Deparse;
 
 my $kvc = Mykeyv::MyKVClient->new();	# singleton in MyKVClient
 
+sub new {
+	my $class = shift;
+
+	my $deparse = B::Deparse->new("-p", "-sC");
+
+	my $self = {};
+
+	bless ($self, $class);
+
+	my @meths = methods($self);
+
+	foreach my $m (@meths) {
+		if ($m =~ /^mykv_remote_/) {
+			no strict 'refs';
+			my $name = $class. "::";
+
+			# we only want to do this once
+			next if $name->{"__scalar__$m"};
+
+			# basically, copy the sub by decompiling and recompiling it.
+			# stick it back in the package as __real__$functionName
+			my $ref = $self->can($m);
+			my $scalar = $deparse->coderef2text($ref);
+			print "SCALAR $scalar\n";
+			my $runme = "my \$s = sub { $scalar }; return \$s;";
+			my $sub;
+			$sub = eval $runme;
+
+			$name->{"__real__$m"} = $sub;
+			$name->{"__scalar__$m"} = $scalar;
+			$name->{$m} = sub {
+				my ($self, $args, $cb) = @_;
+				my $token = $self->{'_computed_mykv_key'} || $self->{'_mykv_storable_make_key'}->();
+       				$self->{'_computed_mykv_key'} = $token;
+
+				print "i would update $token with:\n";
+				print Dumper $args;
+				print "using code\n" . $name->{"__scalar__".$m} . "\n";
+				print Dumper $cb;
+				$cb->();
+			};
+		}
+	}
+
+	return $self;
+}
+
+
 sub mykvStore {
 	my ($self, $cb) = @_;
 
@@ -96,11 +144,19 @@ sub remote {
 
 	my $deparse = B::Deparse->new("-p", "-sC");
 
-	foreach my $f (@foo) {
-		if ($f =~ /mykv_/) {
-			my $ref = $self->can($f);
-			print $deparse->coderef2text($ref);
-		}
-	}
+	#        my ($self, $keys, $code, $args, $cb) = @_;
+
+
+	#foreach my $f (@foo) {
+	#	if ($f =~ /mykv_/) {
+	#		my $ref = $self->can($f);
+	#		my $scalar = $deparse->coderef2text($ref);
+
+	#	}
+	#}
+
+	my $ref = $self->can($sub);
+	my $scalar = $deparse->coderef2text($ref);
+	#$kvc->update($XXX, $scalar, $XXX, $cb);
 
 }

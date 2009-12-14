@@ -288,7 +288,7 @@ sub rehash {
 
 # see readme. run code on remote servers to modify records in the db.
 sub update {
-	my ($self, $keys, $code, $cb) = @_;
+	my ($self, $keys, $code, $args, $cb) = @_;
 
 	$self->{log}->log("in UPDATE!");
 
@@ -366,6 +366,7 @@ sub update {
 					code_id => $remote_code_id,
 					request_id => $apply_request_id,
 					key => $k,
+					args => $args,
 				});
 				$self->{log}->log("serv is $serv, ac is $servs->{$serv}->{ac}");
 				$self->send($servs->{$serv}->{ac}, $o);

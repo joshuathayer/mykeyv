@@ -6,7 +6,8 @@ use base 'Mykeyv::StorableObject';
 sub new {
         my ($class) = @_;
 
-        my $self;
+	my $self = $class->SUPER::new();
+
         $self->{'_mykv_storable_make_key'} = sub { return "fakeuser_object_".$self->{first}; };
         $self->{'_mykv_storable_object_vars'} = ['first','last','friends'];
         $self->{'first'} = '';
@@ -19,9 +20,11 @@ sub new {
 }
 
 sub mykv_remote_append {
-	my ($self, $item) = @_;
+	my ($self, $args) = @_;
 
-	unshift(@{$self->{friends}}, $item);
+	print "wow wtf! do you see me?\n";
+
+	unshift(@{$self->{friends}}, $args->{name});
 
 	return 1;
 }
@@ -67,5 +70,6 @@ $w->{'first'} = "jerry";
 $w->mykvRestore(sub{$cv->send});
 $cv->recv;
 print "jerry's last name is $w->{last}\n";      # prints "jerry's last name is garcia"
-
-$w->remote("_go_do_this");
+my $cv = AnyEvent->condvar;
+$w->mykv_remote_append({name=>"joshua"}, sub {$cv->send});
+$cv->recv;

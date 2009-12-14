@@ -84,7 +84,7 @@ sub message {
 		} elsif ($m->{command} eq "evaluate") {
 			$self->do_evaluate($fh, $m->{code}, $m->{request_id});
 		} elsif ($m->{command} eq "apply") {
-			$self->do_apply($fh, $m->{code_id}, $m->{key}, $m->{request_id});
+			$self->do_apply($fh, $m->{code_id}, $m->{key}, $m->{args}, $m->{request_id});
 		} else {
 			$self->{log}->log("got unknown command $m->{command}");
 		}
@@ -94,14 +94,14 @@ sub message {
 
 
 sub do_apply {
-	my ($self, $fh, $code_id, $key, $client_rid) = @_;
+	my ($self, $fh, $code_id, $key, $args, $client_rid) = @_;
 
 	# ok rad.
 	$self->{log}->log("do apply, code id $code_id key $key");
 
-	$self->{kv}->apply($code_id, $key, sub {
+	$self->{kv}->apply($code_id, $key, $args, sub {
 		my $result = shift;
-		# actually check return values, pls
+		# XXX actually check return values, pls
 
 		my $r = to_json({
 			command => "apply_ok",
