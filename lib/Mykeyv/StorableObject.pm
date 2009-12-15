@@ -38,6 +38,9 @@ sub new {
 
 			$name->{"__real__$m"} = $sub;
 			$name->{"__scalar__$m"} = $scalar;
+
+			# we hijack the original method in our object, and create a function
+			# which actually dispatches the method call to the remote kv server
 			$name->{$m} = sub {
 				my ($self, $args, $cb) = @_;
 				my $token = $self->{'_computed_mykv_key'} || $self->{'_mykv_storable_make_key'}->();
@@ -46,8 +49,13 @@ sub new {
 				print "i would update $token with:\n";
 				print Dumper $args;
 				print "using code\n" . $name->{"__scalar__".$m} . "\n";
-				print Dumper $cb;
-				$cb->();
+
+				# so. 
+				# remote($keys, $code, $args, $cb);
+				# XXX future: cache this code on the server, to avoid an eval ""
+				$kvc->update([$token], $name->{"__scalar__$m"}, $args, $cb);
+
+				#$cb->();
 			};
 		}
 	}

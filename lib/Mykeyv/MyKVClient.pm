@@ -304,7 +304,6 @@ sub update {
 
 	# gather up list of servers we're interested in, organize list of keys by server
 	foreach my $key (@$keys) {
-		
 		$self->{log}->log("key $key!");
 		# sort in to buckets...
 		my $serv = $self->{set}->get_target($key);

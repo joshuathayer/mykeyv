@@ -174,12 +174,15 @@ sub apply {
 		my $record = shift;
 
 		# make this much more robust
+		$self->{log}->log("before applying function:\n");
 		$self->{log}->log(Dumper $record);
 		my $res = $self->{applicables}->{$code_id}->($record, $args);
+		$self->{log}->log("after applying function:\n");
 		$self->{log}->log(Dumper $record);
 		if ($res) {
 			# want to do set here, please
-			$self->set($key, $record, sub { $cb->(1); });
+			$self->{log}->log("apply call done, and returned a true value. going to save record, now");
+			$self->set($key, $record, sub { $self->{log}->log("record save done."); $cb->(1); });
 		} else {
 			$cb->(0);
 		}
@@ -315,7 +318,8 @@ sub set {
 		
 		$self->_setBucket($key, $row, sub {
 			# if we're back here, we've set the proper row in the db
-			#$self->{log}->log("in set callback");
+			$self->{log}->log("in set callback");
+			$self->{log}->log(Dumper $bucket);
 			$cb->();
 		});
 	});	

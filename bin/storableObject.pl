@@ -56,13 +56,13 @@ my $kvc = Mykeyv::MyKVClient->new({
 	cluster_state => $cluster_state,
 });
 
-my $u = FakeUser->new();
-$u->{'first'} = "jerry";
-$u->{'last'} = "garcia";
+#my $u = FakeUser->new();
+#$u->{'first'} = "jerry";
+#$u->{'last'} = "garcia";
 
-my $cv = AnyEvent->condvar;
-$u->mykvStore(sub{$cv->send});
-$cv->recv;
+#my $cv = AnyEvent->condvar;
+#$u->mykvStore(sub{$cv->send});
+#$cv->recv;
 
 my $cv = AnyEvent->condvar;
 my $w = FakeUser->new();
