@@ -21,7 +21,7 @@ sub new {
 	return $self;
 }
 
-sub mykv_remote_append {
+sub mykv_append {
 	my ($self, $args) = @_;
 
 	unshift(@{$self->{friends}}, $args->{name});
@@ -61,10 +61,14 @@ my $cv = AnyEvent->condvar;
 $u->mykvStore(sub{$cv->send});
 $cv->recv;
 
+print "stored new jerry object.\n";
+
 # ...later (or in another piece of code)...
 
-# add joshua to the list of jerry's friends. recall, this
-# actually takes place on the remote kvd server
+# add joshua to the list of jerry's friends. 
+# the 'both' modifies the list both locally *and* on the remote db server
 my $cv = AnyEvent->condvar;
-$u->mykv_remote_append({name=>"joshua"}, sub {$cv->send});
+$u->mykv_append_both({name=>"joshua"}, sub {$cv->send});
 $cv->recv;
+
+print Dumper $u;

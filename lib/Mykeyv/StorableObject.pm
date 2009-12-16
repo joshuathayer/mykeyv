@@ -20,15 +20,15 @@ sub new {
 	my @meths = methods($self);
 
 	foreach my $m (@meths) {
-		if ($m =~ /^mykv_remote_/) {
+		if ($m =~ /^mykv_/) {
 			no strict 'refs';
 			my $name = $class. "::";
 
 			# we only want to do this once
-			next if $name->{"__scalar__$m"};
+			next if $name->{"__mykv_scalar_$m"};
 
 			# basically, copy the sub by decompiling and recompiling it.
-			# stick it back in the package as __real__$functionName
+			# stick it back in the package as mykv_local_$functionName
 			my $ref = $self->can($m);
 			my $scalar = $deparse->coderef2text($ref);
 			print "SCALAR $scalar\n";
@@ -36,27 +36,45 @@ sub new {
 			my $sub;
 			$sub = eval $runme;
 
-			$name->{"__real__$m"} = $sub;
-			$name->{"__scalar__$m"} = $scalar;
+			# we stash aside the source
+			$name->{"__mykv_scalar_$m"} = $scalar;
 
-			# we hijack the original method in our object, and create a function
-			# which actually dispatches the method call to the remote kv server
-			$name->{$m} = sub {
+			# we rename the local copy
+			#$name->{"mykv_local_$m"} = $sub;
+			# no. let's keep the local copy pristene
+
+			# we create a remote version of the sub
+			#$name->{$m."_remote"} = sub {
+			*{"$name${m}_remote"} = sub {
 				my ($self, $args, $cb) = @_;
 				my $token = $self->{'_computed_mykv_key'} || $self->{'_mykv_storable_make_key'}->();
        				$self->{'_computed_mykv_key'} = $token;
 
 				print "i would update $token with:\n";
 				print Dumper $args;
-				print "using code\n" . $name->{"__scalar__".$m} . "\n";
+				print "using code\n" . $name->{"__mykv_scalar_".$m} . "\n";
 
 				# so. 
 				# remote($keys, $code, $args, $cb);
-				# XXX future: cache this code on the server, to avoid an eval ""
-				$kvc->update([$token], $name->{"__scalar__$m"}, $args, $cb);
+				# XXX future: cache this code on the server, to avoid an eval 
+				$kvc->update([$token], $name->{"__mykv_scalar_$m"}, $args, $cb);
 
-				#$cb->();
 			};
+
+			# and we create a 'both' version, which runs the local sub and the remote sub
+			*{"$name${m}_both"} = sub {
+				my ($self, $args, $cb) = @_;
+	
+				# call local first
+				#$name->{"mykv_local_$m"}->($self, $args);
+				#$self->{$m}->($self, $args);
+				*{$name.$m}->($self, $args);
+	
+				# and then call remote
+				#$self->{ "${m}_remote" }->($self, $args, $cb);
+				*{"$name${m}_remote"}->($self, $args, $cb);
+			};
+			
 		}
 	}
 
@@ -138,33 +156,33 @@ sub methods {
 }
 
 
-sub remote {
-	my ($self, $sub) = @_;
-
-	$self = ref $self || $self;
-
-	# wow!
-	# http://www.perlmonks.org/?node_id=62737
-	# http://perldoc.perl.org/5.8.8/B/Deparse.html
-	# http://dev.perl.org/perl6/rfc/335.html
-
-	my @foo = methods($self, 'all');
-
-	my $deparse = B::Deparse->new("-p", "-sC");
-
-	#        my ($self, $keys, $code, $args, $cb) = @_;
-
-
-	#foreach my $f (@foo) {
-	#	if ($f =~ /mykv_/) {
-	#		my $ref = $self->can($f);
-	#		my $scalar = $deparse->coderef2text($ref);
-
-	#	}
-	#}
-
-	my $ref = $self->can($sub);
-	my $scalar = $deparse->coderef2text($ref);
-	#$kvc->update($XXX, $scalar, $XXX, $cb);
-
-}
+#sub remote {
+#	my ($self, $sub) = @_;
+#
+#	$self = ref $self || $self;
+#
+#	# wow!
+#	# http://www.perlmonks.org/?node_id=62737
+#	# http://perldoc.perl.org/5.8.8/B/Deparse.html
+#	# http://dev.perl.org/perl6/rfc/335.html
+#
+#	my @foo = methods($self, 'all');
+#
+#	my $deparse = B::Deparse->new("-p", "-sC");
+#
+#	#        my ($self, $keys, $code, $args, $cb) = @_;
+#
+#
+#	#foreach my $f (@foo) {
+#	#	if ($f =~ /mykv_/) {
+#	#		my $ref = $self->can($f);
+#	#		my $scalar = $deparse->coderef2text($ref);
+#
+#	#	}
+#	#}
+#
+#	my $ref = $self->can($sub);
+#	my $scalar = $deparse->coderef2text($ref);
+#	#$kvc->update($XXX, $scalar, $XXX, $cb);
+#
+#}
