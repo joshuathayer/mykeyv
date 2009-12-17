@@ -116,14 +116,12 @@ sub mykvRestore {
 
 	# hit up the DB
 	$kvc->get($token, sub {
-
 		# copy over params
 		my $dat = shift;
+		unless ($dat) { print "restore failure!\n"; $cb->(undef); return; }
 		foreach my $k (keys (%{$dat->{data}})) {
-			print "key $k!\n";
 			$self->{ $k } = $dat->{data}->{ $k };
 		}
-		print Dumper $self;
 		$cb->($self);
 	});
 }
