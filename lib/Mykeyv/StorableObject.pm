@@ -19,19 +19,22 @@ sub new {
 
 	my @meths = methods($self);
 
+	# munge things into remote and remote+local versions
 	foreach my $m (@meths) {
-		if ($m =~ /^mykv_/) {
+		if ($m =~ /^mykv_.*/) {
 			no strict 'refs';
 			my $name = $class. "::";
 
 			# we only want to do this once
 			next if $name->{"__mykv_scalar_$m"};
+			next if ($m =~ /(both|remote)/);
 
 			# basically, copy the sub by decompiling and recompiling it.
 			# stick it back in the package as mykv_local_$functionName
 			my $ref = $self->can($m);
 			my $scalar = $deparse->coderef2text($ref);
-			print "SCALAR $scalar\n";
+			#print "SCALAR $scalar\n";
+			print "compile $m\n";
 			my $runme = "my \$s = sub { $scalar }; return \$s;";
 			my $sub;
 			$sub = eval $runme;
