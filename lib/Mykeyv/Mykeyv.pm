@@ -95,8 +95,6 @@ sub new {
 	$cv->recv; 
 
 	# we're also a client of our other servers...
-	# XXX 20091212 new singleton contructor in client may have broken this.
-	# actually. maybe not.
 	$self->{kvc} = Mykeyv::MyKVClient->new({
 		cluster => $self->{cluster},
 		pending_cluster => $self->{pending_cluster},
@@ -174,11 +172,11 @@ sub apply {
 		my $record = shift;
 
 		# make this much more robust
-		$self->{log}->log("before applying function:\n");
-		$self->{log}->log(Dumper $record);
+		#$self->{log}->log("before applying function:\n");
+		#$self->{log}->log(Dumper $record);
 		my $res = $self->{applicables}->{$code_id}->($record, $args);
-		$self->{log}->log("after applying function:\n");
-		$self->{log}->log(Dumper $record);
+		#$self->{log}->log("after applying function:\n");
+		#$self->{log}->log(Dumper $record);
 		if ($res) {
 			# want to do set here, please
 			$self->{log}->log("apply call done, and returned a true value. going to save record, now");
