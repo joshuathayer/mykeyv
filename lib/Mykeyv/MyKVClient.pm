@@ -223,6 +223,56 @@ sub get {
 				
 
 }
+
+# list- list all keys across the entire cluster
+# really bad idea to do this in anything close to a production machine
+sub list {
+	my ($self, $cb) = @_;
+
+	weaken $self;
+
+	print "in list.\n";
+
+	my $cluster_count = scalar (@{$self->{cluster}});
+	my $got = 0;
+	my $res = {};
+
+	my $data_cb = sub {
+		my ($serv, $dat) = @_;
+
+		$res->{$serv} = $dat->{data};
+
+		$got += 1;
+		if ($got == $cluster_count) {
+			#print "list:\n";
+			#print Dumper $res;
+			$cb->($res);
+		}
+	};
+		
+
+	foreach my $serv (@{$self->{cluster}}) {
+		my $request_id = $self->get_request_id();
+		my $ac = $serv->{ac};
+		my $j = new JSON;
+
+		my $sid = $serv->{ip} . ':' . $serv->{port};
+
+		$self->{data_callbacks}->{$request_id} = sub {
+			my $dat = shift; $data_cb->($sid, $dat);
+		};
+
+		my $jj = $j->encode({
+			command => "list",
+			request_id => $request_id,
+		});
+
+		$self->send($ac, $jj);
+	}
+
+
+
+}
 	
 
 sub _get {
