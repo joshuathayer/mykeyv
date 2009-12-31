@@ -33,6 +33,7 @@ use AnyEvent::Socket;
 use Data::HexDump;
 use Mykeyv::MyKVClient;
 use Scalar::Util qw/ weaken /;
+use Devel::Peek;
 use Devel::Cycle;
 
 # constructor.
@@ -44,14 +45,15 @@ sub new {
 	my $in = shift;
 
 	my $self = { };
-	my $self = bless($self, $class);
-	weaken(my $wself = $self);
+	bless($self, $class);
+
+	weaken (my $wself = $self);
 
 	# logging
 	$self->{log} = Sislog->new({use_syslog=>1, facility=>"Mykeyv"});
 	$self->{log}->open();
 
-	$self->{log}->log("instantiating Mykeyv object");
+	#$self->{log}->log("instantiating Mykeyv object");
 
 	# query counter. internal index of queries
 	$self->{qc} = 0;
@@ -62,7 +64,6 @@ sub new {
 
 	# query queue. 
 	$self->{queryqueue} = [];
-
 
 	# set up pool of Mysql connections, per 
 	$self->{pool} = new Sisyphus::ConnectionPool;
@@ -141,19 +142,13 @@ sub prep_set {
 sub service_queryqueue {
 	my $self = shift;
 
-	# weaken $self; # not needed i think
-
-	$self->{log}->log("servicing queryqueue");
+	#Devel::Cycle::find_cycle($self);
 
 	if ($self->{pool}->claimable()) {
 		if (scalar(@{$self->{queryqueue}})) {
 			my $sub = pop(@{$self->{queryqueue}});
-			$self->{log}->log("about to call query sub");
 			$sub->();
-			$self->{log}->log("back from query queue sub call");
-		} else {
-			$self->{log}->log("no more queries in queue");
-		}		
+		}
 	}
 
 }
@@ -179,8 +174,6 @@ sub apply {
 	#    unshift(@{$$self{'friends'};}, $item);
 	#    return(1);
 	# }
-
-	weaken $self;
 
 	$self->get($key, sub {
 		my $record = shift;
@@ -317,8 +310,6 @@ sub delete {
 sub set {
 	my ($self, $key, $value, $cb) = @_;
 
-	weaken $self;
-
 	# try to get bucket contents
 	my ($row, $got);
 	$self->_getBucketIfExists($key, sub {
@@ -381,8 +372,6 @@ sub _getBucket {
 
 	my $md5key = md5_base64($key);
 
-	$self->{log}->log("in _getBucket for $key");
-
 	my $q = <<QQ;
 SELECT
 	TheValue
@@ -392,34 +381,26 @@ WHERE
 	Thekey = '$md5key'
 QQ
 	push(@{$self->{queryqueue}}, sub {
-		$self->{log}->log("in queryqyeye callback. looking to claim a connection now");
-
 		$self->{pool}->claim( sub {
 			my $ac = shift;
 
-			my $wac = $ac;
-			#weaken $wac;
-
-			$self->{log}->log("in callback after claiming a connection");
+			weaken $ac;
+			#Devel::Cycle::find_cycle($ac);
 
 			$ac->{protocol}->query(
 				q      => $q,
 				cb     => sub {
-					$self->{log}->log("in query callback");
 					my $row = shift;
 					if ($row->[0] eq "DONE") {
-						$self->{log}->log("got DONE in callback");
-						$self->{pool}->release($wac);
+						#$self->{log}->log("got DONE in callback");
+						$self->{pool}->release($ac);
 						$cb->(["DONE"]);
 					} else {
-						$self->{log}->log("got A ROW in callback");
+						#$self->{log}->log("got A ROW in callback");
 						$cb->($row);
 					}
 				},
 			);
-
-			#Devel::Cycle::find_cycle($ac);
-
 		});
 	});
 
@@ -442,12 +423,11 @@ SET
 ON DUPLICATE KEY UPDATE
 	TheValue = '$value'
 QQ
-	#$self->{log}->log("in _setBucket");
 	push(@{$self->{queryqueue}}, sub {
-		#$self->{log}->log("in queryqueue callback.");
+
 		$self->{pool}->claim(sub {
 			my $ac = shift;
-			#weaken $ac;
+			weaken $ac;
 			$ac->{protocol}->query(
 				q      => $q,
 				cb     => sub {
@@ -464,8 +444,6 @@ QQ
 
 sub rehash {
 	my ($self, $cb) = @_;
-
-	weaken $self;
 	
 	# select every row in our table!
 	my $q = <<QQ;
@@ -480,7 +458,7 @@ QQ
 		$self->{pool}->claim(sub {
 			my $ac = shift;
 
-			#weaken $ac;
+			weaken $ac;
 
 			my $pending = 0;
 
@@ -527,8 +505,6 @@ QQ
 
 sub _rehashBucket {
 	my ($self, $bucket, $cb) = @_;
-
-	weaken $self;
 
 	unless (scalar(keys(%$bucket))) {
 		$self->{log}->log("zero-size bucket rasta!");
