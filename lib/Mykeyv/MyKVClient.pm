@@ -12,6 +12,7 @@ use Data::Dumper;
 
 use Set::ConsistentHash;
 use String::CRC32;
+use Scalar::Util qw/ weaken /;
 
 # OH HAI THIS IS IMPLEMENTED AS A SINGLETON
 my $instance = undef;
@@ -96,6 +97,7 @@ sub makeConnections {
     my $set_name = shift;
     my $set;    
     my $cluster;
+
     if ($set_name eq "pending_set") { 
         $set = $self->{pending_set};
         $cluster = $self->{pending_cluster};
@@ -109,6 +111,7 @@ sub makeConnections {
         my $cv = AnyEvent->condvar;
         
         my $ac = $self->createConnection($cluster, $target);
+
         $self->connectOne($ac, sub {
             $cv->send;
         });
@@ -120,6 +123,8 @@ sub makeConnections {
 
 sub createConnection {
     my ($self, $cluster, $target, $cb) = @_;
+
+    weaken $self;
 
     my $serv = $cluster->[$target];
     my $ac = new Sisyphus::Connector;
@@ -158,6 +163,8 @@ sub connectOne {
     my $ac = shift;
     my $cb = shift;
 
+    weaken $self;
+
     # on_error callback for connection phase only- do appropriate log, but also do callback
     $ac->{on_error} = sub {
         $self->{log}->log("detected error while attempting to open connection to server $ac->{host}:$ac->{port}, deferring connection");
@@ -182,11 +189,12 @@ sub connectOne {
         $ac->{state} = "connected";
         $cb->($c);
     });
-
 }
 
 sub get {
     my ($self, $key, $cb) = @_;
+
+    weaken $self;
 
     # ok the callback for this - if we find a row, call the callback with it
     # if not, we do the whole thing again with the pending cluster
@@ -236,8 +244,8 @@ sub _get {
 # should properly be called "connectAndSend", tries to connect to the ac if it's not connected
 sub send {
     my ($self, $ac, $j) = @_;
-    my $name = 'send';
-    $self->{log}->log("$name asked to send on connection, state $ac->{state}");
+
+    $self->{log}->log("asked to send on connection, state $ac->{state}");
     unless($ac->{state} eq "connected") {
         $self->connectOne($ac, sub {
             $ac->send($j);

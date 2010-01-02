@@ -10,6 +10,7 @@ use Data::Dumper;
 use JSON;
 use Set::ConsistentHash;
 use String::CRC32;
+use Scalar::Util qw/ weaken /;
 
 # TODO
 # alarms to clear return_values
@@ -96,6 +97,8 @@ sub message {
 sub do_apply {
 	my ($self, $fh, $code_id, $key, $args, $client_rid) = @_;
 
+	weaken $self;
+
 	# ok rad.
 	$self->{log}->log("do apply, code id $code_id key $key");
 
@@ -144,6 +147,9 @@ sub do_evaluate {
 
 sub do_set {
 	my ($self, $fh, $key, $val, $client_rid) = @_;
+
+	weaken $self;
+
 	my $rid = $self->getRID();
 
 	$self->{log}->log("set >>$key<<");
@@ -165,6 +171,9 @@ sub do_set {
 
 sub do_get {
 	my ($self, $fh, $key, $client_rid) = @_;
+
+	weaken $self;
+
 	my $rid = $self->getRID();
 
 	$self->{log}->log("get >>$key<< id $client_rid");
@@ -185,6 +194,9 @@ sub do_get {
 
 sub do_rehash {
 	my ($self, $fh, $client_rid) = @_;
+
+	weaken $self;
+
 	my $rid = $self->getRID();
 
 	$self->{kv}->rehash(sub {
@@ -203,6 +215,9 @@ sub do_rehash {
 
 sub do_delete {
 	my ($self, $fh, $key, $client_rid) = @_;
+
+	weaken $self;
+
 	my $rid = $self->getRID();
 
 	$self->{log}->log("delete >>$key<< id $client_rid");

@@ -32,6 +32,9 @@ use AnyEvent;
 use AnyEvent::Socket;
 use Data::HexDump;
 use Mykeyv::MyKVClient;
+use Scalar::Util qw/ weaken /;
+use Devel::Peek;
+use Devel::Cycle;
 
 # constructor.
 # note that THIS WILL BLOCK CALLING CODE
@@ -42,6 +45,9 @@ sub new {
 	my $in = shift;
 
 	my $self = { };
+	bless($self, $class);
+
+	weaken (my $wself = $self);
 
 	# logging
 	$self->{log} = Sislog->new({use_syslog=>1, facility=>"Mykeyv"});
@@ -71,7 +77,7 @@ sub new {
 		db => $in->{db},
 		err => sub {
 			my $err = shift;
-			$self->{log}->log("An error occured while querying MySQL: $err");
+			$wself->{log}->log("An error occured while querying MySQL: $err");
 		},
 	}; 
 
@@ -88,7 +94,7 @@ sub new {
 	my $cv = AnyEvent->condvar;
 	$self->{pool}->connect(
 		sub {
-			$self->{log}->log("connected to local mysql instance");
+			$wself->{log}->log("connected to local mysql instance");
 			$cv->send;
 		}
 	);
@@ -96,12 +102,11 @@ sub new {
 
 	# we're also a client of our other servers...
 	$self->{kvc} = Mykeyv::MyKVClient->new({
-		cluster => $self->{cluster},
-		pending_cluster => $self->{pending_cluster},
-		cluster_state => $self->{cluster_state},
+		cluster => $wself->{cluster},
+		pending_cluster => $wself->{pending_cluster},
+		cluster_state => $wself->{cluster_state},
 	});
 
-	my $self = bless($self, $class);
 
 	# just like in the client object, we maintain a Set object, for the consistent hashing
 	# this needs to be maintained for rehashing, and for potetial future things.
@@ -110,7 +115,7 @@ sub new {
 		$self->prep_set("pending_set", $self->{pending_cluster});
 	}	
 
-	$self->{pool}->{release_cb} = sub { $self->service_queryqueue };
+	$self->{pool}->{release_cb} = sub { $wself->service_queryqueue };
 
 	return $self;
 }
@@ -136,6 +141,8 @@ sub prep_set {
 
 sub service_queryqueue {
 	my $self = shift;
+
+	#Devel::Cycle::find_cycle($self);
 
 	if ($self->{pool}->claimable()) {
 		if (scalar(@{$self->{queryqueue}})) {
@@ -195,6 +202,8 @@ sub get {
 	my $val;
 	my $res;
 
+	weaken $self;
+
 	$self->_getBucket($key, sub {
 		$row = shift;
 
@@ -227,6 +236,8 @@ sub get {
 # if it exists, we return it as a hash. if not we return an empty hash.
 sub _getBucketIfExists {
 	my ($self, $key, $cb) = @_;
+
+	weaken $self;
 
 	my $bucket = {};
 	# try to get bucket contents, or return an empty hash if there's nothing in the db
@@ -262,6 +273,8 @@ sub _getBucketIfExists {
 
 sub delete {
 	my ($self, $key, $cb) = @_;
+
+	weaken $self;
 	
 	$self->{log}->log("delete >>$key<<");
 
@@ -355,6 +368,8 @@ sub setSync {
 sub _getBucket {
 	my ($self, $key, $cb) = @_;
 
+	weaken $self;
+
 	my $md5key = md5_base64($key);
 
 	my $q = <<QQ;
@@ -368,6 +383,9 @@ QQ
 	push(@{$self->{queryqueue}}, sub {
 		$self->{pool}->claim( sub {
 			my $ac = shift;
+
+			weaken $ac;
+			#Devel::Cycle::find_cycle($ac);
 
 			$ac->{protocol}->query(
 				q      => $q,
@@ -392,6 +410,8 @@ QQ
 sub _setBucket {
 	my ($self, $key, $value, $cb) = @_;
 
+	weaken $self;
+
 	my $md5key = md5_base64($key);
 	$value = Sisyphus::Proto::Mysql::esc($value);
 
@@ -403,11 +423,11 @@ SET
 ON DUPLICATE KEY UPDATE
 	TheValue = '$value'
 QQ
-	#$self->{log}->log("in _setBucket");
 	push(@{$self->{queryqueue}}, sub {
-		#$self->{log}->log("in queryqueue callback.");
+
 		$self->{pool}->claim(sub {
 			my $ac = shift;
+			weaken $ac;
 			$ac->{protocol}->query(
 				q      => $q,
 				cb     => sub {
@@ -437,6 +457,8 @@ QQ
 	push(@{$self->{queryqueue}}, sub {
 		$self->{pool}->claim(sub {
 			my $ac = shift;
+
+			weaken $ac;
 
 			my $pending = 0;
 
