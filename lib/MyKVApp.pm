@@ -31,9 +31,9 @@ sub new {
 	my $kv = Mykeyv::Mykeyv->new({
 		'host' => $dbip, # "127.0.0.1",
 		'port' => $dbport, # 3306,
-		'user' => $dbuser, # 'keyvalue',
-		'pw' => $dbpw, # 'roses',
-		'db' => $dbdb, # 'keyvalue',
+		'user' => $dbuser, # 'KeyValue',
+		'pw' => $dbpw, # 'KeyValuePass',
+		'db' => $dbdb, # 'KeyValue',
 		'table' => $dbtable, 
 		'log' => $log,
 		'cluster' => $cluster,

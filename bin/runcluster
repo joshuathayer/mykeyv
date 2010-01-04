@@ -1,5 +1,9 @@
 #!/usr/bin/perl
 
+#
+# This functionality has been ported into kvdrun.pl in the other project
+#
+
 if ($#ARGV < 0) {
 	print "Script to start/stop a development cluster of kvds.\n\n";
 	print "Usage: $0 start|stop\n";
@@ -11,6 +15,16 @@ if ($ARGV[0] eq "start") {
 	`./kvd.pl ./kvd1.conf`;
 	`./kvd.pl ./kvd2.conf`;
 	`./kvd.pl ./kvd3.conf`;
+}
+
+if ($ARGV[0] eq "startlocal") {
+  my $local_lib = "-Mblib=$ENV{HOME}/projects/sisyphus ";
+  $local_lib .= "-Mblib=$ENV{HOME}/projects/mykeyv ";
+  print "local_lib = $local_lib\n";
+  `perl $local_lib ./kvd.pl ./kvd0.conf`;
+  `perl $local_lib ./kvd.pl ./kvd1.conf`;
+  `perl $local_lib ./kvd.pl ./kvd2.conf`;
+  `perl $local_lib ./kvd.pl ./kvd3.conf`;
 }
 
 if ($ARGV[0] eq "stop") {
