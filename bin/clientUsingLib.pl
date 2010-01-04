@@ -1,12 +1,7 @@
 #!/usr/bin/perl
 # client using client lib
 
-use lib ("/Users/joshua/projects/sisyphus/lib/");
-use lib ("/Users/joshua/projects/mykeyv/lib/");
-use lib ("/home/joshua/projects/sisyphus/lib/");
-use lib ("/home/joshua/projects/mykeyv/lib/");
-
-use MyKVClient;
+use Mykeyv::MyKVClient;
 use JSON;
 use Data::Dumper;
 
@@ -22,7 +17,7 @@ my $cluster = $Config::cluster;
 my $pending_cluster = $Config::pending_cluster;
 my $cluster_state = $Config::cluster_state;
 
-my $kvc = MyKVClient->new({
+my $kvc = Mykeyv::MyKVClient->new({
 	cluster => $cluster,
 	pending_cluster => $pending_cluster,
 	cluster_state => $cluster_state,
