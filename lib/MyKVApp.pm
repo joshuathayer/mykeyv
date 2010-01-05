@@ -55,39 +55,39 @@ sub getRID {
 
 sub new_connection {
 	my $self = shift;
-	my ($ip, $port, $fh) = @_;
+	my ($ip, $port, $cid) = @_;
 	
 	# create an array to hold return values
-	$self->{return_values}->{$fh} = [];
+	$self->{return_values}->{$cid} = [];
 }
 
 sub remote_closed {
-    my ($self, $host, $port, $fh) = @_;
+    my ($self, $host, $port, $cid) = @_;
 
     print STDERR "$host closed connection!\n";
 }
 
 # called by framework
 sub message {
-	my ($self, $host, $port, $message, $fh) = @_;
+	my ($self, $host, $port, $message, $cid) = @_;
 
 	foreach my $m (@$message) {
 		$m = from_json($m);
-		$self->{log}->log("command $m->{command}");
+		$self->{log}->log("command $m->{command} rid $m->{request_id}");
 		if ($m->{command} eq "set") {
-			$self->do_set($fh, $m->{key}, $m->{data}, $m->{request_id});
+			$self->do_set($cid, $m->{key}, $m->{data}, $m->{request_id});
 		} elsif ($m->{command} eq "get") {
-			$self->do_get($fh, $m->{key}, $m->{request_id});
+			$self->do_get($cid, $m->{key}, $m->{request_id});
 		} elsif ($m->{command} eq "delete") {
-			$self->do_delete($fh, $m->{key}, $m->{request_id});
+			$self->do_delete($cid, $m->{key}, $m->{request_id});
 		} elsif ($m->{command} eq "rehash") {
-			$self->do_rehash($fh, $m->{request_id});
+			$self->do_rehash($cid, $m->{request_id});
 		} elsif ($m->{command} eq "evaluate") {
-			$self->do_evaluate($fh, $m->{code}, $m->{request_id});
+			$self->do_evaluate($cid, $m->{code}, $m->{request_id});
 		} elsif ($m->{command} eq "apply") {
-			$self->do_apply($fh, $m->{code_id}, $m->{key}, $m->{args}, $m->{request_id});
+			$self->do_apply($cid, $m->{code_id}, $m->{key}, $m->{args}, $m->{request_id});
 		} elsif ($m->{command} eq "list") {
-			$self->do_list($fh, $m->{request_id});
+			$self->do_list($cid, $m->{request_id});
 		} else {
 			$self->{log}->log("got unknown command $m->{command}");
 		}
@@ -97,7 +97,7 @@ sub message {
 
 
 sub do_apply {
-	my ($self, $fh, $code_id, $key, $args, $client_rid) = @_;
+	my ($self, $cid, $code_id, $key, $args, $client_rid) = @_;
 
 	weaken $self;
 
@@ -113,13 +113,13 @@ sub do_apply {
 			request_id => $client_rid,
 		});
 
-		push (@{$self->{return_values}->{$fh}}, $r);
-		$self->{client_callback}->([$fh]);		
+		push (@{$self->{return_values}->{$cid}}, $r);
+		$self->{client_callback}->([$cid]);		
 	});
 }
 
 sub do_evaluate {
-	my ($self, $fh, $code_scalar, $client_rid) = @_;
+	my ($self, $cid, $code_scalar, $client_rid) = @_;
 
 	my $runme = "my \$s = sub { $code_scalar }; return \$s;";
 	my $sub;
@@ -131,7 +131,7 @@ sub do_evaluate {
 	# no reason this should block, no need to do it async'ly
 	my $code_id = $self->{kv}->set_evaluated($sub);
 
-	$self->{log}->log("code id $code_id");
+	$self->{log}->log("evaluated code id $code_id for rid $client_rid");
 
 	# ok even though nothing has blocked, we return to our client using a callback
 	# in the future, we might want to do eval's in their own processes, to guard against
@@ -143,12 +143,12 @@ sub do_evaluate {
 		remote_code_id => $code_id,
 	});
 
-	push (@{$self->{return_values}->{$fh}}, $r);
-	$self->{client_callback}->([$fh]);		
+	push (@{$self->{return_values}->{$cid}}, $r);
+	$self->{client_callback}->([$cid]);		
 }
 
 sub do_set {
-	my ($self, $fh, $key, $val, $client_rid) = @_;
+	my ($self, $cid, $key, $val, $client_rid) = @_;
 
 	weaken $self;
 
@@ -165,14 +165,14 @@ sub do_set {
 				data => $v,
 				request_id => $client_rid,
 			});
-			push (@{$self->{return_values}->{$fh}}, $r);
-			$self->{client_callback}->([$fh]);		
+			push (@{$self->{return_values}->{$cid}}, $r);
+			$self->{client_callback}->([$cid]);		
 		}
 	);
 }
 
 sub do_get {
-	my ($self, $fh, $key, $client_rid) = @_;
+	my ($self, $cid, $key, $client_rid) = @_;
 
 	weaken $self;
 
@@ -188,14 +188,14 @@ sub do_get {
 				data => $v,
 				request_id => $client_rid,
 			});
-			push (@{$self->{return_values}->{$fh}}, $r);
-			$self->{client_callback}->([$fh]);		
+			push (@{$self->{return_values}->{$cid}}, $r);
+			$self->{client_callback}->([$cid]);		
 		}
 	);
 }
 
 sub do_list {
-	my ($self, $fh, $client_rid) = @_;
+	my ($self, $cid, $client_rid) = @_;
 
 	weaken $self;
 
@@ -203,18 +203,19 @@ sub do_list {
 	$self->{log}->log("doing list id $client_rid");
 	$self->{kv}->list(sub {
 		my $keys = shift;
+		$self->{log}->log("do_list callback rid $client_rid");
 		my $r = to_json({
 			command => "list_ok",
 			data => $keys,
 			request_id => $client_rid,
 		});
-		push (@{$self->{return_values}->{$fh}}, $r);
-		$self->{client_callback}->([$fh]);
+		push (@{$self->{return_values}->{$cid}}, $r);
+		$self->{client_callback}->([$cid]);
 	});
 }
 
 sub do_rehash {
-	my ($self, $fh, $client_rid) = @_;
+	my ($self, $cid, $client_rid) = @_;
 
 	weaken $self;
 
@@ -227,15 +228,15 @@ sub do_rehash {
 				command => "rehash_ok",	
 				request_id => $client_rid,
 			});
-			push (@{$self->{return_values}->{$fh}}, $r);
-			$self->{client_callback}->([$fh]);		
+			push (@{$self->{return_values}->{$cid}}, $r);
+			$self->{client_callback}->([$cid]);		
 		}
 	);
 }
 
 
 sub do_delete {
-	my ($self, $fh, $key, $client_rid) = @_;
+	my ($self, $cid, $key, $client_rid) = @_;
 
 	weaken $self;
 
@@ -251,15 +252,15 @@ sub do_delete {
 				data => $v,
 				request_id => $client_rid,
 			});
-			push (@{$self->{return_values}->{$fh}}, $r);
-			$self->{client_callback}->([$fh]);		
+			push (@{$self->{return_values}->{$cid}}, $r);
+			$self->{client_callback}->([$cid]);		
 		}
 	);
 }
 
 sub get_data {
-	my ($self, $fh) = @_;
-	my $v = pop(@{$self->{return_values}->{$fh}});
+	my ($self, $cid) = @_;
+	my $v = pop(@{$self->{return_values}->{$cid}});
 	return $v;
 }
 

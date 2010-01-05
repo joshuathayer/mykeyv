@@ -241,8 +241,6 @@ sub list {
 
 		$got += 1;
 		if ($got == $cluster_count) {
-			#print "list:\n";
-			#print Dumper $res;
 			$cb->($res);
 		}
 	};
@@ -254,6 +252,8 @@ sub list {
 		my $j = new JSON;
 
 		my $sid = $serv->{ip} . ':' . $serv->{port};
+
+		$self->{log}->log("sending request_id $request_id to server $sid");
 
 		$self->{data_callbacks}->{$request_id} = sub {
 			my $dat = shift; $data_cb->($sid, $dat);
