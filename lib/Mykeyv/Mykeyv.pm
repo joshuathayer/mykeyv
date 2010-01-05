@@ -33,8 +33,8 @@ use AnyEvent::Socket;
 use Data::HexDump;
 use Mykeyv::MyKVClient;
 use Scalar::Util qw/ weaken /;
-use Devel::Peek;
-use Devel::Cycle;
+#use Devel::Peek;
+#use Devel::Cycle;
 
 # constructor.
 # note that THIS WILL BLOCK CALLING CODE
