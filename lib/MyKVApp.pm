@@ -86,6 +86,8 @@ sub message {
 			$self->do_evaluate($fh, $m->{code}, $m->{request_id});
 		} elsif ($m->{command} eq "apply") {
 			$self->do_apply($fh, $m->{code_id}, $m->{key}, $m->{args}, $m->{request_id});
+		} elsif ($m->{command} eq "list") {
+			$self->do_list($fh, $m->{request_id});
 		} else {
 			$self->{log}->log("got unknown command $m->{command}");
 		}
@@ -190,6 +192,25 @@ sub do_get {
 			$self->{client_callback}->([$fh]);		
 		}
 	);
+}
+
+sub do_list {
+	my ($self, $fh, $client_rid) = @_;
+
+	weaken $self;
+
+	my $rid = $self->getRID();
+	$self->{log}->log("doing list id $client_rid");
+	$self->{kv}->list(sub {
+		my $keys = shift;
+		my $r = to_json({
+			command => "list_ok",
+			data => $keys,
+			request_id => $client_rid,
+		});
+		push (@{$self->{return_values}->{$fh}}, $r);
+		$self->{client_callback}->([$fh]);
+	});
 }
 
 sub do_rehash {

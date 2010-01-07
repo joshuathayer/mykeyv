@@ -45,15 +45,14 @@ sub new {
 	my $in = shift;
 
 	my $self = { };
-	bless($self, $class);
-
-	weaken (my $wself = $self);
+	my $self = bless($self, $class);
+	weaken(my $wself = $self);
 
 	# logging
 	$self->{log} = Sislog->new({use_syslog=>1, facility=>"Mykeyv"});
 	$self->{log}->open();
 
-	#$self->{log}->log("instantiating Mykeyv object");
+	$self->{log}->log("instantiating Mykeyv object");
 
 	# query counter. internal index of queries
 	$self->{qc} = 0;
@@ -64,6 +63,7 @@ sub new {
 
 	# query queue. 
 	$self->{queryqueue} = [];
+
 
 	# set up pool of Mysql connections, per 
 	$self->{pool} = new Sisyphus::ConnectionPool;
@@ -142,13 +142,19 @@ sub prep_set {
 sub service_queryqueue {
 	my $self = shift;
 
-	#Devel::Cycle::find_cycle($self);
+	# weaken $self; # not needed i think
+
+	$self->{log}->log("servicing queryqueue");
 
 	if ($self->{pool}->claimable()) {
 		if (scalar(@{$self->{queryqueue}})) {
 			my $sub = pop(@{$self->{queryqueue}});
+			$self->{log}->log("about to call query sub");
 			$sub->();
-		}
+			$self->{log}->log("back from query queue sub call");
+		} else {
+			$self->{log}->log("no more queries in queue");
+		}		
 	}
 
 }
@@ -174,6 +180,8 @@ sub apply {
 	#    unshift(@{$$self{'friends'};}, $item);
 	#    return(1);
 	# }
+
+	weaken $self;
 
 	$self->get($key, sub {
 		my $record = shift;
@@ -219,7 +227,7 @@ sub get {
 				$row = Storable::thaw($row);
 				if (defined($row->{$key})) {
 					#$self->{log}->log("get success");
-					$val = $row->{$key};
+					$val = $row->{$key}->{value};
 				}
 			}
 		} else {
@@ -310,6 +318,8 @@ sub delete {
 sub set {
 	my ($self, $key, $value, $cb) = @_;
 
+	weaken $self;
+
 	# try to get bucket contents
 	my ($row, $got);
 	$self->_getBucketIfExists($key, sub {
@@ -324,7 +334,8 @@ sub set {
 			$self->{log}->log("this looks like a new key >>$key<<");
 
 		}	
-		$bucket->{$key} = $value;
+		$bucket->{$key}->{value} = $value;
+		$bucket->{$key}->{key} = $key; # why? so we can list original keys if we want
 		$row = Storable::freeze($bucket);
 		
 		$self->_setBucket($key, $row, sub {
@@ -372,6 +383,8 @@ sub _getBucket {
 
 	my $md5key = md5_base64($key);
 
+	$self->{log}->log("in _getBucket for $key");
+
 	my $q = <<QQ;
 SELECT
 	TheValue
@@ -381,26 +394,34 @@ WHERE
 	Thekey = '$md5key'
 QQ
 	push(@{$self->{queryqueue}}, sub {
+		$self->{log}->log("in queryqyeye callback. looking to claim a connection now");
+
 		$self->{pool}->claim( sub {
 			my $ac = shift;
 
-			weaken $ac;
-			#Devel::Cycle::find_cycle($ac);
+			my $wac = $ac;
+			#weaken $wac;
+
+			$self->{log}->log("in callback after claiming a connection");
 
 			$ac->{protocol}->query(
 				q      => $q,
 				cb     => sub {
+					$self->{log}->log("in query callback");
 					my $row = shift;
 					if ($row->[0] eq "DONE") {
-						#$self->{log}->log("got DONE in callback");
-						$self->{pool}->release($ac);
+						$self->{log}->log("got DONE in callback");
+						$self->{pool}->release($wac);
 						$cb->(["DONE"]);
 					} else {
-						#$self->{log}->log("got A ROW in callback");
+						$self->{log}->log("got A ROW in callback");
 						$cb->($row);
 					}
 				},
 			);
+
+			#Devel::Cycle::find_cycle($ac);
+
 		});
 	});
 
@@ -423,11 +444,12 @@ SET
 ON DUPLICATE KEY UPDATE
 	TheValue = '$value'
 QQ
+	#$self->{log}->log("in _setBucket");
 	push(@{$self->{queryqueue}}, sub {
-
+		#$self->{log}->log("in queryqueue callback.");
 		$self->{pool}->claim(sub {
 			my $ac = shift;
-			weaken $ac;
+			#weaken $ac;
 			$ac->{protocol}->query(
 				q      => $q,
 				cb     => sub {
@@ -444,6 +466,8 @@ QQ
 
 sub rehash {
 	my ($self, $cb) = @_;
+
+	weaken $self;
 	
 	# select every row in our table!
 	my $q = <<QQ;
@@ -458,7 +482,7 @@ QQ
 		$self->{pool}->claim(sub {
 			my $ac = shift;
 
-			weaken $ac;
+			#weaken $ac;
 
 			my $pending = 0;
 
@@ -506,6 +530,8 @@ QQ
 sub _rehashBucket {
 	my ($self, $bucket, $cb) = @_;
 
+	weaken $self;
+
 	unless (scalar(keys(%$bucket))) {
 		$self->{log}->log("zero-size bucket rasta!");
 		$cb->();
@@ -535,6 +561,85 @@ sub _rehashBucket {
 		}	
 	}
 
+}
+
+# list all values i have. potenatially very sucky to run this.
+sub list {
+	my ($self, $cb) = @_;
+
+	my @ret;
+
+	$self->_listBuckets(sub {
+		my $row = shift;
+
+		$self->{log}->log("listBucket callback");
+
+		$row = $row->[0];
+
+		if (defined($row)) {
+			if ($row eq "DONE") {
+				# ok this result is done.
+				$self->{log}->log("DONE in list callback");
+				$cb->(\@ret);
+			} else {
+				# whereas this is real data
+				$row = Storable::thaw($row);
+				foreach my $k (keys(%$row)) {
+					push(@ret, $row->{$k}->{key});
+				}
+			}
+		} else {
+			# jt not sure in what instance we reach here.
+			$self->{log}->log("get failure? _getBucket called its callback with undef");
+			$cb->(\@ret);
+		}
+
+		if ($row eq "DONE") {
+			$cb->(\@ret);
+			return;
+		}
+
+	});
+
+	$self->service_queryqueue();
+
+}
+
+sub _listBuckets {
+	my ($self, $cb) = @_;
+
+	weaken $self;
+
+	my $q = <<QQ;
+SELECT
+	TheValue
+FROM
+	$self->{table}
+QQ
+
+	push(@{$self->{queryqueue}}, sub {
+		$self->{pool}->claim( sub {
+			my $ac = shift;
+
+			#weaken $ac;
+			#Devel::Cycle::find_cycle($ac);
+
+			$ac->{protocol}->query(
+				q      => $q,
+				cb     => sub {
+					my $row = shift;
+					if ($row->[0] eq "DONE") {
+						$self->{pool}->release($ac);
+						$cb->(["DONE"]);
+					} else {
+						$cb->($row);
+					}
+				},
+			);
+		});
+	});
+
+	$self->service_queryqueue();
 }
 
 1;

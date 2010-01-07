@@ -1,12 +1,6 @@
 #!/usr/bin/perl
 # client using client lib
 
-use Sisyphus;
-use Mykeyv::Mykeyv;
-#use lib ("/Users/joshua/projects/sisyphus/lib/");
-#use lib ("/Users/joshua/projects/mykeyv/lib/");
-#use lib ("$ENV{HOME}/projects/sisyphus/lib/");
-#use lib ("$ENV{HOME}/projects/mykeyv/lib/");
 use Mykeyv::MyKVClient;
 use JSON;
 use Data::Dumper;
