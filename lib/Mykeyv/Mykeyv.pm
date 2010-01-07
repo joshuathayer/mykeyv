@@ -581,6 +581,7 @@ sub list {
 				# ok this result is done.
 				$self->{log}->log("DONE in list callback");
 				$cb->(\@ret);
+				return;
 			} else {
 				# whereas this is real data
 				$row = Storable::thaw($row);
@@ -620,9 +621,6 @@ QQ
 	push(@{$self->{queryqueue}}, sub {
 		$self->{pool}->claim( sub {
 			my $ac = shift;
-
-			#weaken $ac;
-			#Devel::Cycle::find_cycle($ac);
 
 			$ac->{protocol}->query(
 				q      => $q,
