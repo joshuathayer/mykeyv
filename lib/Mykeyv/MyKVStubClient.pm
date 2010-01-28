@@ -14,6 +14,12 @@ use Set::ConsistentHash;
 use String::CRC32;
 use Scalar::Util qw/ weaken /;
 
+use Test::MockObject;
+
+my $mock = Test::MockObject->new();
+$mock->fake_module(
+    'Mykeyv::MyKVClient'
+
 # OH HAI THIS IS IMPLEMENTED AS A SINGLETON
 my $instance = undef;
 
@@ -34,6 +40,7 @@ sub new {
         $self = $instance;
     } else {
         $self = {};
+
         bless $self, $class;
         $instance = $self;
     }

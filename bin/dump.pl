@@ -7,8 +7,8 @@ use JSON;
 use Data::Dumper;
 
 BEGIN {
-	if ($#ARGV < 0) {
-		print "Usage: $0 PATH_TO_CONFFILE\n";
+	if ($#ARGV < 1) {
+		print "Usage: $0 PATH_TO_CONFFILE KEY\n";
 		exit;
 	}
 }
@@ -18,16 +18,18 @@ my $cluster = $Config::cluster;
 my $pending_cluster = $Config::pending_cluster;
 my $cluster_state = $Config::cluster_state;
 
+my $key = $ARGV[1];
+
 my $kvc = Mykeyv::MyKVClient->new({
 	cluster => $cluster,
 	cluster_state => $cluster_state,
 });
 
 my $cv = AnyEvent->condvar;
-$kvc->list(sub {
-	my $list = shift;
-	print Dumper $list;
-	print "list done\n";
+$kvc->get($key, sub {
+	my $item = shift;
+	print Dumper $item;
+	print "dump done\n";
 	$cv->send;
 });
 $cv->recv;

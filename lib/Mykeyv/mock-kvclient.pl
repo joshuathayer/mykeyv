@@ -33,7 +33,6 @@ $mock->fake_module( 'Mykeyv::MyKVClient',
             $instance = $self;
         }
     
-        unless ($in) { return $self; };
     
         return $self;
     },
