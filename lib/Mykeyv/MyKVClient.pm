@@ -148,8 +148,9 @@ sub createConnection {
             return;
         }
         # $self->{log}->log("found, and calling, callback for request $request_id");
-        delete $self->{data_callbacks}->{$request_id};
-        $cb->($m);
+        unless ($cb->($m)) {
+        	delete $self->{data_callbacks}->{$request_id};
+		}
     };
 
     $cluster->[$target]->{ac} = $ac;
@@ -439,6 +440,56 @@ sub update {
     
         $self->send($servs->{$serv}->{ac}, $o);
     }
+}
+
+sub delete {
+    my ($self, $key, $cb) = @_;
+    $self->{log}->log("deleting >>$key<<");
+    my $request_id = $self->get_request_id();
+
+    my $j = to_json({
+        command => "delete",
+        key => $key,
+        request_id => $request_id,
+    });
+
+    if ($self->{cluster_state} eq "pending-write") {
+        my $serv = $self->{set}->get_target($key);
+        my $pending_serv = $self->{pending_set}->get_target($key);
+
+        if ($serv ne $pending_serv) {
+            $self->{log}->log(">>$key<< hashes to different servers in the old cluster vs the new cluster. deleting from both");
+
+            my $ac = $self->{cluster}->[$serv]->{ac};
+            my $pac = $self->{cluster}->[$pending_serv]->{ac};
+
+			my $waiting_on = 2;
+			$self->{data_callbacks}->{$request_id} = sub {
+				unless ($waiting_on--) {
+					$cb->("deleted");
+					return 0; # we're done, this will delete the callback
+							  # for this request id
+				}
+				return 1; # keep the callback for this request id around,
+					      # we're expecting a response from another server
+			};
+
+            $self->send($ac, $j);
+            $self->send($pac, $j);
+
+        } else {
+            $self->{log}->log(">>$key<< hashes to same server in both new and old cluster maps ($serv vs $pending_serv). deleting from that server.");
+            my $ac = $self->{cluster}->[$serv]->{ac};
+    		$self->{data_callbacks}->{$request_id} = $cb;
+    		$self->send($ac, $j);
+        }
+	} else {
+		# cluster in normal state
+        my $serv = $self->{set}->get_target($key);
+        my $ac = $self->{cluster}->[$serv]->{ac};
+   		$self->{data_callbacks}->{$request_id} = $cb;
+    	$self->send($ac, $j);
+	}
 }
 
 sub set {
