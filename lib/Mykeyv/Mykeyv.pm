@@ -142,18 +142,12 @@ sub prep_set {
 sub service_queryqueue {
 	my $self = shift;
 
-	# weaken $self; # not needed i think
-
-	$self->{log}->log("servicing queryqueue");
-
 	if ($self->{pool}->claimable()) {
 		if (scalar(@{$self->{queryqueue}})) {
 			my $sub = pop(@{$self->{queryqueue}});
-			$self->{log}->log("about to call query sub");
 			$sub->();
-			$self->{log}->log("back from query queue sub call");
 		} else {
-			$self->{log}->log("no more queries in queue");
+			# $self->{log}->log("no more queries in queue");
 		}		
 	}
 
@@ -187,13 +181,12 @@ sub apply {
 		my $record = shift;
 
 		# make this much more robust
-		#$self->{log}->log("before applying function:\n");
-		#$self->{log}->log(Dumper $record);
+		$self->{log}->log("before applying function:\n");
+		$self->{log}->log(Dumper $record);
 		my $res = $self->{applicables}->{$code_id}->($record, $args);
-		#$self->{log}->log("after applying function:\n");
-		#$self->{log}->log(Dumper $record);
+		$self->{log}->log("after applying function:\n");
+		$self->{log}->log(Dumper $record);
 		if ($res) {
-			# want to do set here, please
 			$self->{log}->log("apply call done, and returned a true value. going to save record, now");
 			$self->set($key, $record, sub { $self->{log}->log("record save done."); $cb->(1); });
 		} else {
@@ -220,13 +213,12 @@ sub get {
 		if (defined($row)) {
 			if ($row eq "DONE") {
 				# ok this result is done.
-				$self->{log}->log("DONE in get callback");
+				# $self->{log}->log("DONE in get callback");
 				$cb->($val);
 			} else {
 				# whereas this is real data
 				$row = Storable::thaw($row);
 				if (defined($row->{$key})) {
-					#$self->{log}->log("get success");
 					$val = $row->{$key}->{value};
 				}
 			}
@@ -258,15 +250,15 @@ sub _getBucketIfExists {
 			if ($got eq "DONE") {
 				# this is _getBucket telling us it returned all its data...
 				if (scalar(keys(%$bucket))) { 
-					$self->{log}->log("found extant bucket for >>$key<<");
+					# $self->{log}->log("found extant bucket for >>$key<<");
 				} else {
-					$self->{log}->log("no extant bucket for >>$key<<");
+					# $self->{log}->log("no extant bucket for >>$key<<");
 				}
 
 				$cb->($bucket);	
 			} else {
 				# whereas this is _getBucket actually giving us a row
-				$self->{log}->log("found existing bucket for key >>$key<<");
+				# $self->{log}->log("found existing bucket for key >>$key<<");
 				$bucket = Storable::thaw($got);
 			}
 		} else {
@@ -301,13 +293,14 @@ sub delete {
 			# rather than set an empty row. TODO	
 			# something along the lines of unless (scalar(keys($%bucket))) { _DELETE } else {
 			$self->_setBucket($key, $row, sub {
-				# if we're back here, we've set the proper row in the db
-				#$self->{log}->log("in set callback");
-				$cb->();
+				# we are passed undef on error, 1 on success
+				# we'll pass those along
+				$cb->(shift);
 			});
 
 		} else {
 			$self->{log}->log(">>$key<< doesn't exist, nothing to delete");
+			$cb->(undef);
 		}
 	});	
 
@@ -339,10 +332,8 @@ sub set {
 		$row = Storable::freeze($bucket);
 		
 		$self->_setBucket($key, $row, sub {
-			# if we're back here, we've set the proper row in the db
-			$self->{log}->log("in set callback");
-			$self->{log}->log(Dumper $bucket);
-			$cb->();
+			# we are passed undef on error, 1 on success. 
+			$cb->(shift);
 		});
 	});	
 
@@ -394,34 +385,26 @@ WHERE
 	Thekey = '$md5key'
 QQ
 	push(@{$self->{queryqueue}}, sub {
-		$self->{log}->log("in queryqyeye callback. looking to claim a connection now");
 
 		$self->{pool}->claim( sub {
 			my $ac = shift;
 
 			my $wac = $ac;
-			#weaken $wac;
-
-			$self->{log}->log("in callback after claiming a connection");
 
 			$ac->{protocol}->query(
 				q      => $q,
 				cb     => sub {
-					$self->{log}->log("in query callback");
 					my $row = shift;
 					if ($row->[0] eq "DONE") {
-						$self->{log}->log("got DONE in callback");
+						# $self->{log}->log("got DONE in callback");
 						$self->{pool}->release($wac);
 						$cb->(["DONE"]);
 					} else {
-						$self->{log}->log("got A ROW in callback");
+						# $self->{log}->log("got A ROW in callback");
 						$cb->($row);
 					}
 				},
 			);
-
-			#Devel::Cycle::find_cycle($ac);
-
 		});
 	});
 
@@ -444,18 +427,21 @@ SET
 ON DUPLICATE KEY UPDATE
 	TheValue = '$value'
 QQ
-	#$self->{log}->log("in _setBucket");
+
 	push(@{$self->{queryqueue}}, sub {
-		#$self->{log}->log("in queryqueue callback.");
 		$self->{pool}->claim(sub {
 			my $ac = shift;
-			#weaken $ac;
 			$ac->{protocol}->query(
 				q      => $q,
 				cb     => sub {
 					my $row = shift;
 					$self->{pool}->release($ac);
-					$cb->($row);
+					if ($row->[0] eq "DONE") {
+						$cb->(1);
+					} else {
+						$self->{log}->log("probable error in set: $row->[0]");
+						$cb->(undef);
+					}
 				},
 			);
 		});
@@ -486,7 +472,7 @@ QQ
 
 			my $pending = 0;
 
-			$self->{log}->log("within claim callback. going to query.");
+			# $self->{log}->log("within claim callback. going to query.");
 
 			$ac->{protocol}->query(
 				q      => $q,
@@ -496,27 +482,27 @@ QQ
 
 					if ($row eq "DONE" ) {
 						$seenDone = 1;
-						$self->{log}->log("got a DONE in rehash, pending $pending");
+						# $self->{log}->log("got a DONE in rehash, pending $pending");
 					} else {
 						# a row from the db. we deserialize it and rehash
 						# anything within it
 						$pending += 1;
 
-						$self->{log}->log("got a row in rehash, pending $pending");
+						# $self->{log}->log("got a row in rehash, pending $pending");
 						my $bucket = Storable::thaw($row);
 	
 						$self->_rehashBucket($bucket, sub {
 							$self->{pool}->release($ac);
 							$pending -= 1;
 							if ($seenDone and ($pending == 0)) {
-								$self->{log}->log("got a WEDGY DONE in rehash and pending==0, calling callback.");
+								# $self->{log}->log("got a WEDGY DONE in rehash and pending==0, calling callback.");
 								$cb->();
 							}
 						});
 					}
 
 					if ($seenDone and ($pending == 0)) {
-						$self->{log}->log("got a DONE in rehash and pending==0, calling callback.");
+						# $self->{log}->log("got a DONE in rehash and pending==0, calling callback.");
 						$cb->();
 					}
 				},
@@ -533,7 +519,7 @@ sub _rehashBucket {
 	weaken $self;
 
 	unless (scalar(keys(%$bucket))) {
-		$self->{log}->log("zero-size bucket rasta!");
+		# $self->{log}->log("zero-size bucket rasta!");
 		$cb->();
 	}
 
@@ -548,10 +534,10 @@ sub _rehashBucket {
 			$self->{log}->log(">>$key<< hashes to NEW server $serv vs $pending_serv");
 			$self->get($key, sub {
 				my $v = shift;
-				$self->{log}->log("going to try calling >>set $key<< on my client");
+				# $self->{log}->log("going to try calling >>set $key<< on my client");
 
 				$self->{kvc}->set($key, $v, sub {
-					$self->{log}->log("OK! migrated record.");
+					# $self->{log}->log("OK! migrated record.");
 					$cb->();
 				});
 			});
@@ -572,14 +558,11 @@ sub list {
 	$self->_listBuckets(sub {
 		my $row = shift;
 
-		$self->{log}->log("listBucket callback");
-
 		$row = $row->[0];
 
 		if (defined($row)) {
 			if ($row eq "DONE") {
 				# ok this result is done.
-				$self->{log}->log("DONE in list callback");
 				$cb->(\@ret);
 				return;
 			} else {

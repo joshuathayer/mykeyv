@@ -182,12 +182,23 @@ sub do_get {
 
 	$self->{kv}->get($key, sub {
 			my $v = shift;
-			my $r = to_json({
-				command => "get_ok",	
-				key => $key,
-				data => $v,
-				request_id => $client_rid,
-			});
+			my $r;
+		   	if (defined($v)) {
+				$r = to_json({
+					command => "get_ok",	
+					key => $key,
+					data => $v,
+					request_id => $client_rid,
+				});
+			} else {
+                print "in MyKVApp, returning get_notfound!\n";
+				$r = to_json({
+					command => "get_notfound",	
+					key => $key,
+					data => undef,
+					request_id => $client_rid,
+				});
+			}
 			push (@{$self->{return_values}->{$cid}}, $r);
 			$self->{client_callback}->([$cid]);		
 		}
@@ -203,7 +214,6 @@ sub do_list {
 	$self->{log}->log("doing list id $client_rid");
 	$self->{kv}->list(sub {
 		my $keys = shift;
-		$self->{log}->log("do_list callback rid $client_rid");
 		my $r = to_json({
 			command => "list_ok",
 			data => $keys,

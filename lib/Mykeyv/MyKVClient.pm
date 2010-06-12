@@ -14,7 +14,7 @@ use Set::ConsistentHash;
 use String::CRC32;
 use Scalar::Util qw/ weaken /;
 
-# OH HAI THIS IS IMPLEMENTED AS A SINGLETON
+# singleton instance
 my $instance = undef;
 
 sub new {
@@ -54,16 +54,12 @@ sub new {
     $self->{log}->open();
 
     $self->prep_set("set", $self->{cluster});
-
     $self->makeConnections();
-    $self->{log}->log("under first makeConnections");
 
     # if we have are in a pending state, we want to prepare a hash object for that, too
     if (($self->{cluster_state} eq "pending") or ($self->{cluster_state} eq "pending-write")) {
-        $self->{log}->log("in pending connection clause");
         $self->prep_set("pending_set", $self->{pending_cluster});
         $self->makeConnections("pending_set");    
-        $self->{log}->log("under second makeConnections");
     }
 
     
@@ -73,8 +69,6 @@ sub new {
 # init the consistent hash object
 sub prep_set {
     my ($self, $set, $cluster) = @_;
-
-    $self->{log}->log("prep_set $set");
 
     # set is a ConsistentHash object.
     $self->{ $set } = Set::ConsistentHash->new,
@@ -134,23 +128,22 @@ sub createConnection {
 
     $ac->{state} = "disconnected";
 
-    $self->{log}->log("ip $serv->{ip}, port $serv->{port}");
-
-    # this gets called from our server. perhaps as a response to a get or set
-    # request, perhaps for something else
+    # all data from our server goes through here.
+    # we dispatch into callbacks based on the request_id
+    # the return value of the callback tells us if we should pull the request out of the table
     $ac->{app_callback} = sub {
         my $m = shift;
         $m = from_json($m);
         my $request_id = $m->{request_id};
-        my $cb = $self->{data_callbacks}->{$request_id};
+        my $cb = $self->{data_callbacks}->{$request_id}->{cb};
+
         unless ($cb) {
             $self->{log}->log("received message from server for unrecognized request id $request_id");
             return;
         }
-        # $self->{log}->log("found, and calling, callback for request $request_id");
-        unless ($cb->($m)) {
-        	delete $self->{data_callbacks}->{$request_id};
-		}
+
+        $cb->($m);
+        delete $self->{data_callbacks}->{$request_id};
     };
 
     $cluster->[$target]->{ac} = $ac;
@@ -204,19 +197,22 @@ sub get {
 
         my $r = shift;
 
-        if (defined($r->{data})) {
+        # if (defined($r->{data})) {
+        if ($r->{command} eq "get_ok") {
             $cb->($r);
+            return undef;
         } else {
             if (($self->{cluster_state} eq "pending")
             or ($self->{cluster_state} eq "pending-write")) {
-                $self->{log}->log("failed to find >>$key<< in first bucket, trying pending cluster map");
+                $self->{log}->log(">>".$r->{command}."<< from _get for >>$key<< in first bucket, trying pending cluster map");
                 $self->_get($self->{pending_set},
                             $self->{pending_cluster},
                             $key, $cb);
-            
+                return 1; 
             } else {
-                $self->{log}->log("really failed to find >>$key<<");
-                $cb->(undef);
+                $self->{log}->log(">>".$r->{command}."<< from _get for >>$key<<");
+                $cb->($r);
+                return undef;
             }
         }
     });
@@ -228,8 +224,6 @@ sub list {
 	my ($self, $cb) = @_;
 
 	weaken $self;
-
-	print "in list.\n";
 
 	my $cluster_count = scalar (@{$self->{cluster}});
 	my $got = 0;
@@ -243,6 +237,7 @@ sub list {
 		$got += 1;
 		if ($got == $cluster_count) {
 			$cb->($res);
+            return undef;
 		}
 	};
 		
@@ -256,9 +251,9 @@ sub list {
 
 		$self->{log}->log("sending request_id $request_id to server $sid");
 
-		$self->{data_callbacks}->{$request_id} = sub {
+		$self->setCallback($request_id, sub {
 			my $dat = shift; $data_cb->($sid, $dat);
-		};
+		} );
 
 		my $jj = $j->encode({
 			command => "list",
@@ -267,9 +262,6 @@ sub list {
 
 		$self->send($ac, $jj);
 	}
-
-
-
 }
 	
 sub _get {
@@ -282,7 +274,7 @@ sub _get {
     my $ac = $cluster->[$serv]->{ac};
 
     my $request_id = $self->get_request_id();
-    $self->{data_callbacks}->{$request_id} = $cb;
+	$self->setCallback($request_id, $cb);
     my $j = new JSON;
     my $jj = $j->encode({
         command => "get",
@@ -322,7 +314,8 @@ sub rehash {
 
         $self->{log}->log("asking server $serv to rehash");
 
-        $self->{data_callbacks}->{$request_id} = sub {
+		$self->setCallback($request_id, sub {
+			# XXX check for errors please
             $rehashers = $rehashers - 1;
 
             $self->{log}->log("server $serv reported being done with rehash, $rehashers to go");
@@ -331,7 +324,7 @@ sub rehash {
                 $self->{log}->log("i think i'm done with all my rehashing.");
                 $cb->();
             }
-        };
+        });
 
         my $j = to_json({
             command => "rehash",
@@ -376,8 +369,9 @@ sub update {
 
         my $evaluate_request_id = $self->get_request_id();
 
-        $self->{data_callbacks}->{$evaluate_request_id} = sub {
+		$self->setCallback($evaluate_request_id, sub {
             my $r = shift;
+
             my $remote_code_id = $r->{remote_code_id};
 
             $self->{log}->log("in evaluate callback, code $remote_code_id");
@@ -396,7 +390,7 @@ sub update {
             foreach my $k (@{$servs->{$serv}->{keys}}) {
 
                 my $apply_request_id = $self->get_request_id();
-                $self->{data_callbacks}->{$apply_request_id} = sub {
+				$self->setCallback($apply_request_id, sub {
                     # this gets called when the remote server is done updating
                     # a single record
 
@@ -415,7 +409,7 @@ sub update {
                     } else {
                         $self->{log}->log("i'm done with $total_updates_done of $total_keys_ever updates");
                     }
-                };
+                });
 
                 my $o = to_json({
                     command => "apply",
@@ -428,7 +422,7 @@ sub update {
                 $self->send($servs->{$serv}->{ac}, $o);
             }
 
-        };
+        });
 
         # ok, actually send the compile request, which will set in to action all the 
         # things above.
@@ -460,34 +454,33 @@ sub delete {
         if ($serv ne $pending_serv) {
             $self->{log}->log(">>$key<< hashes to different servers in the old cluster vs the new cluster. deleting from both");
 
-            my $ac = $self->{cluster}->[$serv]->{ac};
-            my $pac = $self->{cluster}->[$pending_serv]->{ac};
-
 			my $waiting_on = 2;
-			$self->{data_callbacks}->{$request_id} = sub {
-				unless ($waiting_on--) {
+            my $dec_waiting; $dec_waiting = sub {
+                unless ($waiting_on--) {
 					$cb->("deleted");
-					return 0; # we're done, this will delete the callback
-							  # for this request id
-				}
-				return 1; # keep the callback for this request id around,
-					      # we're expecting a response from another server
-			};
-
-            $self->send($ac, $j);
-            $self->send($pac, $j);
+                } else {
+                    $self->setCallback($request_id, &$dec_waiting);
+                }
+            };
+            foreach my $ac (
+              $self->{cluster}->[$serv]->{ac},
+              $self->{cluster}->[$pending_serv]->{ac}
+            ) {
+                $j->{request_id} = $self->get_request_id();
+                $self->send($ac, $j);
+             };
 
         } else {
             $self->{log}->log(">>$key<< hashes to same server in both new and old cluster maps ($serv vs $pending_serv). deleting from that server.");
             my $ac = $self->{cluster}->[$serv]->{ac};
-    		$self->{data_callbacks}->{$request_id} = $cb;
+			$self->setCallback($request_id, $cb);
     		$self->send($ac, $j);
         }
 	} else {
 		# cluster in normal state
         my $serv = $self->{set}->get_target($key);
         my $ac = $self->{cluster}->[$serv]->{ac};
-   		$self->{data_callbacks}->{$request_id} = $cb;
+		$self->setCallback($request_id, $cb);
     	$self->send($ac, $j);
 	}
 }
@@ -533,7 +526,7 @@ sub set {
     }
 
     my $request_id = $self->get_request_id();
-    $self->{data_callbacks}->{$request_id} = $cb;
+	$self->setCallback($request_id, $cb);
 
     my $j = new JSON;
     $j->allow_blessed();
@@ -544,7 +537,7 @@ sub set {
         data => $val,
         request_id => $request_id,
     });
-    # print "json $o\n";    
+
     $self->send($ac, $o);
 }
 
@@ -555,6 +548,30 @@ sub get_request_id {
     $self->{log}->log("KV Client req id $self->{request_id}\n");
 
     return $self->{request_id};
+}
+
+# timeout: -1 == no timeout, 0 == default timeout, n == n second timeout
+sub setCallback {
+	my ($self, $rid, $cb, $timeout) = @_;
+
+	unless(defined($timeout)) { $timeout = 5; }
+
+    my $to;
+    if ($timeout > 0) {
+	    $to = AnyEvent->timer(
+	    	after => $timeout,
+	    	cb => sub {
+        		$self->{log}->log("query $rid experienced a timeout.");
+	    		$cb->({
+	    			command => "error",
+	    			errorstr => "timeout occured while waiting for mykeyv server"
+	    		});
+	    	}
+    	);
+    }
+
+	$self->{data_callbacks}->{$rid}->{to} = $to;
+	$self->{data_callbacks}->{$rid}->{cb} = $cb;
 }
 
 1;

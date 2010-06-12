@@ -13,6 +13,8 @@ requires 'Set::ConsistentHash'    => 0;
 requires 'String::CRC32'          => 0;
 requires 'Data::HexDump'          => 0;
 requires 'File::Lockfile'         => 0;
+requires 'Log::Syslog::Fast'         => 0;
+requires 'URI::Escape'			=> 0;
 
 auto_install;
 

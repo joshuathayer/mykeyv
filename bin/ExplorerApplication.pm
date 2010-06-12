@@ -5,6 +5,7 @@ use base 'Sisyphus::Application';
 
 use Data::Dumper;
 use Devel::Leak;
+use URI::Escape;
 use JSON;
 
 my $handle;
@@ -85,8 +86,8 @@ sub message {
 		        [200, "OK", {"Content-type" => "text/javascript",}, $self->{jq}];
 	    $self->{client_callback}->([$fh]);
     } elsif ($url =~ /\/json\/(.*)/) {
-        print "JSON REQUEST FOR $1 (from $url)\n";
-        my $k = $1;
+		my $k = URI::Escape::uri_unescape($1);
+        print "JSON REQUEST FOR $k (from $url)\n";
         if ($1 eq '') {
             $self->{kvc}->list(sub {
                 my $list = shift;
@@ -98,10 +99,17 @@ sub message {
         } else {
             $self->{kvc}->get($k, sub {
                 my $item = shift;
-                my $j = JSON::to_json($item->{data});
-    	        $responses->{$fh} =
-	    	        [200, "OK", {"Content-type" => "application/json",}, $j];
-	            $self->{client_callback}->([$fh]);
+				if ($item->{command} eq "get_ok") {
+                	my $j = JSON::to_json($item->{data});
+    	        	$responses->{$fh} =
+	    	    	    [200, "OK", {"Content-type" => "application/json",}, $j];
+	            	$self->{client_callback}->([$fh]);
+				} else {
+                	my $j = JSON::to_json({"error" => "item not found"});
+    	        	$responses->{$fh} =
+	    	    	    [404, "NOT FOUND", {"Content-type" => "application/json",}, $j];
+	            	$self->{client_callback}->([$fh]);
+				}
             });
         }   
     } elsif ($url =~ /\/see\/(.*)/) {

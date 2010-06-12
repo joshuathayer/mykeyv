@@ -29,7 +29,8 @@ my $key = $ARGV[1];
 my $cv = AnyEvent->condvar;
 $kvc->delete($key, sub {
 	my  $r = shift;
-	print "delete done: $r\n";
+	print "delete done:\n";
+	print Dumper $r;
 	$cv->send;
 });
 $cv->recv;
