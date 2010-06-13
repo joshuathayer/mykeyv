@@ -19,7 +19,7 @@ package Mykeyv::Mykeyv;
 
 use strict;
 use Sisyphus::Connector;
-use Sisyphus::ConnectionPool;
+use Sisyphus::DemandConnectionPool;
 use Sisyphus::Proto::Factory;
 use Sisyphus::Proto::Mysql;
 use Digest::MD5 qw(md5_base64);
@@ -66,7 +66,7 @@ sub new {
 
 
 	# set up pool of Mysql connections, per 
-	$self->{pool} = new Sisyphus::ConnectionPool;
+	$self->{pool} = new Sisyphus::DemandConnectionPool;
 	$self->{pool}->{host} = $in->{host};
 	$self->{pool}->{port} = $in->{port};
 	$self->{pool}->{connections_to_make} = 10;
@@ -90,11 +90,10 @@ sub new {
 	$self->{pending_cluster} = $in->{pending_cluster};
 	$self->{cluster_state} = $in->{cluster_state};
 
-
 	my $cv = AnyEvent->condvar;
 	$self->{pool}->connect(
 		sub {
-			$wself->{log}->log("connected to local mysql instance");
+			$wself->{log}->log("created connection instances");
 			$cv->send;
 		}
 	);
